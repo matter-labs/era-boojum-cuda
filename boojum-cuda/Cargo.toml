@@ -1,0 +1,51 @@
+[package]
+name = "boojum-cuda"
+version = "0.1.0"
+edition = "2021"
+build = "build/main.rs"
+
+[build-dependencies]
+boojum = { git = "https://github.com/matter-labs/boojum.git", branch = "main" }
+cmake = "^0"
+itertools = "^0"
+
+[dependencies]
+boojum = { git = "https://github.com/matter-labs/boojum.git", branch = "main" }
+cudart = { path = "../cudart" }
+cudart-sys = { path = "../cudart-sys" }
+itertools = "^0"
+lazy_static = "^1"
+
+[dev-dependencies]
+blake2 = "^0"
+criterion = "^0"
+criterion-cuda = { path = "../criterion-cuda" }
+criterion-macro = "^0"
+itertools = "^0"
+rand = "^0"
+rayon = "^1"
+serial_test = "^2"
+
+[[bench]]
+name = "blake2s"
+harness = false
+
+[[bench]]
+name = "gates"
+harness = false
+
+[[bench]]
+name = "goldilocks"
+harness = false
+
+[[bench]]
+name = "ntt"
+harness = false
+
+[[bench]]
+name = "ops_complex"
+harness = false
+
+[[bench]]
+name = "poseidon"
+harness = false

@@ -1,0 +1,8 @@
+[package]
+name = "criterion-cuda"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+criterion = "^0"
+cudart = { path = "../cudart" }

@@ -1,0 +1,3 @@
+[workspace]
+members = ["boojum-cuda", "criterion-cuda", "cudart", "cudart-sys"]
+resolver = "2"

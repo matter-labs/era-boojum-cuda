@@ -1,0 +1,12 @@
+[package]
+name = "cudart"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cudart-sys = { path = "../cudart-sys" }
+bitflags = "^2"
+criterion = "^0"
+
+[dev-dependencies]
+serial_test = "^2"
