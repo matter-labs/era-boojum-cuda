@@ -3,14 +3,15 @@ name = "boojum-cuda"
 version = "0.1.0"
 edition = "2021"
 build = "build/main.rs"
+license = "MIT OR Apache-2.0"
 
 [build-dependencies]
-boojum = { git = "https://github.com/matter-labs/boojum.git", branch = "main" }
+boojum = { git = "https://github.com/matter-labs/era-boojum.git", branch = "main" }
 cmake = "^0"
 itertools = "^0"
 
 [dependencies]
-boojum = { git = "https://github.com/matter-labs/boojum.git", branch = "main" }
+boojum = { git = "https://github.com/matter-labs/era-boojum.git", branch = "main" }
 cudart = { path = "../cudart" }
 cudart-sys = { path = "../cudart-sys" }
 itertools = "^0"
