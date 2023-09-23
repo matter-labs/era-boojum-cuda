@@ -8,12 +8,16 @@ or re-auditing a single line of code. zkSync Era also uses an LLVM-based compile
 write smart contracts in C++, Rust and other popular languages.
 
 
-## Boojum-cuda
-Boojum-cuda is a library implementing GPU-accelerated cryptographic functionality for the zkSync prover.
+## Boojum-CUDA
+Boojum-CUDA is a library implementing GPU-accelerated cryptographic functionality for the zkSync prover.
 
-Requirements: CUDA 12.x CMake 3.24 and up clang rust nightly toolchain
+Prerequisites: 
+- CUDA 12.x
+- CMake 3.24 and up
+- clang
+- rust nightly toolchain
 
-By default, the CUDA code is built for the GPU that is present on the system. If there is no GPU in the system or 
+By default, the CUDA code is compiled for the GPU that is present in the system. If there is no GPU in the system or 
 another architecture is desired, the environment variable `CUDAARCHS` can be set to the desired architecture. 
 See https://cmake.org/cmake/help/latest/variable/CMAKE_CUDA_ARCHITECTURES.html.
 
