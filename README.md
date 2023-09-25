@@ -23,7 +23,7 @@ See https://cmake.org/cmake/help/latest/variable/CMAKE_CUDA_ARCHITECTURES.html.
 
 ## Policies
 
-- [Security policy](.github/SECURITY.md)
+- [Security policy](SECURITY.md)
 - [Contribution policy](CONTRIBUTING.md)
 
 ## License
