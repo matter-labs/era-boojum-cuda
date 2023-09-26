@@ -85,13 +85,13 @@ jobs:
       - name: Download test binaries built with CUDA 12.2
         uses: actions/download-artifact@v3
         with:
-          name: boojum-cuda-12.2.0-devel-ubuntu22.04-test-binaries
+          name: boojum-cuda-12.2.0-devel-ubuntu20.04-test-binaries
           path: boojum-cuda-test-binaries/12.2
 
       - name: Download test binaries built with CUDA 12.0
         uses: actions/download-artifact@v3
         with:
-          name: boojum-cuda-12.0.0-devel-ubuntu22.04-test-binaries
+          name: boojum-cuda-12.0.0-devel-ubuntu20.04-test-binaries
           path: boojum-cuda-test-binaries/12.0
 
       - name: Run test binaries built with CUDA 12.2
