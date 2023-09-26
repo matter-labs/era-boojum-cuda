@@ -11,7 +11,7 @@ jobs:
     runs-on: [ubuntu-latest]
     strategy:
       matrix:
-        cuda: ["12.2.0-devel-ubuntu22.04", "12.0.0-devel-ubuntu22.04"]
+        cuda: ["12.2.0-devel-ubuntu20.04", "12.0.0-devel-ubuntu20.04"]
     container:
       image: nvidia/cuda:${{ matrix.cuda }}
     steps:
@@ -19,10 +19,11 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          echo "deb http://archive.ubuntu.com/ubuntu lunar main" >> /etc/apt/sources.list
           apt update && apt install -y \
             pkg-config libclang-dev build-essential lldb lld \
-            clang openssl libssl-dev gcc g++ cmake wget jq
+            clang openssl libssl-dev gcc g++ wget jq
+          echo "deb http://archive.ubuntu.com/ubuntu lunar main" >> /etc/apt/sources.list
+          apt update && apt install -y cmake
           echo "/usr/local/nvidia/bin:/usr/local/cuda/bin" >> $GITHUB_PATH
 
       - uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 # v3
