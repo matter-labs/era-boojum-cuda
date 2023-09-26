@@ -19,7 +19,7 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          echo "#deb http://archive.ubuntu.com/ubuntu lunar main" >> /etc/apt/sources.list
+          echo "deb http://archive.ubuntu.com/ubuntu lunar main" >> /etc/apt/sources.list
           apt update && apt install -y \
             pkg-config libclang-dev build-essential lldb lld \
             clang openssl libssl-dev gcc g++ cmake wget jq
