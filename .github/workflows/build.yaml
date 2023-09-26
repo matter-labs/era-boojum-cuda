@@ -1,0 +1,112 @@
+name: Boojum CUDA build and test
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  boojum-build:
+    runs-on: [ubuntu-latest]
+    strategy:
+      matrix:
+        cuda: ["12.2.0-devel-ubuntu20.04", "12.0.0-devel-ubuntu20.04"]
+    container:
+      image: nvidia/cuda:${{ matrix.cuda }}
+    steps:
+      - name: Prepare environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt update && apt install -y \
+            pkg-config libclang-dev build-essential lldb lld \
+            clang openssl libssl-dev gcc g++ wget curl jq
+          echo "/usr/local/nvidia/bin:/usr/local/cuda/bin" >> $GITHUB_PATH
+
+      - uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 # v3
+
+      - name: Setup rustup
+        run: |
+          wget -q -O - https://sh.rustup.rs | bash -s -- -y
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+          echo "export PATH=\"$HOME/.cargo/bin:\$PATH\"" >> "${HOME}/.bash_profile"
+
+      - name: Setup CMake
+        run: |
+          curl -LO https://github.com/Kitware/CMake/releases/download/v3.24.3/cmake-3.24.3-linux-x86_64.sh && \
+            chmod +x cmake-3.24.3-linux-x86_64.sh && \
+            ./cmake-3.24.3-linux-x86_64.sh --skip-license --prefix=/usr/local
+
+      - name: Check CMake version
+        run: |
+          cmake --version
+
+      - name: Check CUDA version
+        run: |
+          nvcc --version
+
+      - name: Setup rust
+        run: |
+          rustup set profile minimal
+          rustup toolchain install nightly-2023-04-17
+          rustup default nightly-2023-04-17
+
+      - name: Build tests and copy binaries to a separate dir
+        shell: bash
+        run: |
+          mkdir artifacts
+          CUDAARCHS=80 CARGO_TARGET_DIR=./build \
+          cargo +nightly-2023-04-17 test --no-run --release --message-format=json -q \
+          | jq -r 'select(.executable != null) | .executable' \
+          | while read binary; do
+            cp "$binary" artifacts/
+          done
+
+      - name: Upload test binaries as a single artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: boojum-cuda-${{ matrix.cuda }}-test-binaries
+          path: artifacts/
+          if-no-files-found: error
+
+  boojum-test:
+    runs-on: [matterlabs-ci-gpu-runner]
+    needs: boojum-build
+    steps:
+      - name: Prepare environment
+        run: |
+          echo "/usr/local/nvidia/bin:/usr/local/cuda/bin" >> $GITHUB_PATH
+
+      - name: Check Nvidia driver version
+        run: |
+          nvidia-smi
+
+      - name: Download test binaries built with CUDA 12.2
+        uses: actions/download-artifact@v3
+        with:
+          name: boojum-cuda-12.2.0-devel-ubuntu20.04-test-binaries
+          path: boojum-cuda-test-binaries/12.2
+
+      - name: Download test binaries built with CUDA 12.0
+        uses: actions/download-artifact@v3
+        with:
+          name: boojum-cuda-12.0.0-devel-ubuntu20.04-test-binaries
+          path: boojum-cuda-test-binaries/12.0
+
+      - name: Run test binaries built with CUDA 12.2
+        id: test_cuda_12_2
+        continue-on-error: true
+        run: |
+          for binary in boojum-cuda-test-binaries/12.2/*; do
+            chmod +x $binary
+            $binary
+          done
+
+      - name: Run test binaries built with CUDA 12.0
+        if: steps.test_cuda_12_2.outcome == 'failure' || steps.test_cuda_12_2.outcome == 'success'
+        run: |
+          for binary in boojum-cuda-test-binaries/12.0/*; do
+            chmod +x $binary
+            $binary
+          done
