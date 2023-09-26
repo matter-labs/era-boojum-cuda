@@ -22,8 +22,6 @@ jobs:
           apt update && apt install -y \
             pkg-config libclang-dev build-essential lldb lld \
             clang openssl libssl-dev gcc g++ wget jq
-          echo "deb http://archive.ubuntu.com/ubuntu lunar main" >> /etc/apt/sources.list
-          apt update && apt install -y cmake
           echo "/usr/local/nvidia/bin:/usr/local/cuda/bin" >> $GITHUB_PATH
 
       - uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 # v3
@@ -33,6 +31,12 @@ jobs:
           wget -q -O - https://sh.rustup.rs | bash -s -- -y
           echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
           echo "export PATH=\"$HOME/.cargo/bin:\$PATH\"" >> "${HOME}/.bash_profile"
+
+      - name: Setup CMake
+        run: |
+          curl -LO https://github.com/Kitware/CMake/releases/download/v3.24.3/cmake-3.24.3-linux-x86_64.sh && \
+            chmod +x cmake-3.24.3-linux-x86_64.sh && \
+            ./cmake-3.24.3-linux-x86_64.sh --skip-license --prefix=/usr/local
 
       - name: Check CMake version
         run: |
