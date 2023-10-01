@@ -569,7 +569,7 @@ impl BatchInvImpl for GoldilocksField {
 }
 
 impl BatchInvImpl for VectorizedExtensionField {
-    const INV_BATCH_SIZE: u32 = 10;
+    const INV_BATCH_SIZE: u32 = 6;
     fn get_batch_inv_kernel() -> unsafe extern "C" fn(
         PtrAndStride<VectorizedExtensionFieldDeviceType>,
         MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
@@ -1772,7 +1772,7 @@ mod tests {
         test_bit_reverse(true);
     }
 
-    fn test_batch_inv(in_place: bool) {
+    fn test_batch_inv_bf(in_place: bool) {
         const LOG_N: usize = 16;
         const N: usize = 1 << LOG_N;
         let h_src = Uniform::new(0, GoldilocksField::ORDER)
@@ -1785,13 +1785,13 @@ mod tests {
         if in_place {
             let mut d_values = DeviceAllocation::alloc(N).unwrap();
             memory_copy_async(&mut d_values, &h_src, &stream).unwrap();
-            super::batch_inv_in_place(&mut d_values, &stream).unwrap();
+            super::batch_inv_in_place::<GoldilocksField>(&mut d_values, &stream).unwrap();
             memory_copy_async(&mut h_dst, &d_values, &stream).unwrap();
         } else {
             let mut d_src = DeviceAllocation::alloc(N).unwrap();
             let mut d_dst = DeviceAllocation::alloc(N).unwrap();
             memory_copy_async(&mut d_src, &h_src, &stream).unwrap();
-            super::batch_inv(&d_src, &mut d_dst, &stream).unwrap();
+            super::batch_inv::<GoldilocksField>(&d_src, &mut d_dst, &stream).unwrap();
             memory_copy_async(&mut h_dst, &d_dst, &stream).unwrap();
         }
         stream.synchronize().unwrap();
@@ -1803,13 +1803,62 @@ mod tests {
     }
 
     #[test]
-    fn batch_inv() {
-        test_batch_inv(false);
+    fn batch_inv_bf() {
+        test_batch_inv_bf(false);
     }
 
     #[test]
-    fn batch_inv_in_place() {
-        test_batch_inv(true);
+    fn batch_inv_in_place_bf() {
+        test_batch_inv_bf(true);
+    }
+
+    fn test_batch_inv_ef(in_place: bool) {
+        type VEF = VectorizedExtensionField;
+        const LOG_N: usize = 16;
+        const N: usize = 1 << LOG_N;
+        let h_src_bf = Uniform::new(0, GoldilocksField::ORDER)
+            .sample_iter(&mut thread_rng())
+            .take(2 * N)
+            .map(GoldilocksField)
+            .collect_vec();
+        let mut h_dst_bf = vec![GoldilocksField::ZERO; 2 * N];
+        let stream = CudaStream::default();
+        if in_place {
+            let mut d_values_bf = DeviceAllocation::alloc(2 * N).unwrap();
+            memory_copy_async(&mut d_values_bf, &h_src_bf, &stream).unwrap();
+            let mut d_values_ef = unsafe { d_values_bf.transmute_mut::<VEF>() };
+            super::batch_inv_in_place::<VEF>(&mut d_values_ef, &stream).unwrap();
+            memory_copy_async(&mut h_dst_bf, &d_values_bf, &stream).unwrap();
+        } else {
+            let mut d_src_bf = DeviceAllocation::alloc(2 * N).unwrap();
+            let mut d_dst_bf = DeviceAllocation::alloc(2 * N).unwrap();
+            memory_copy_async(&mut d_src_bf, &h_src_bf, &stream).unwrap();
+            let d_src_ef = unsafe { d_src_bf.transmute::<VEF>() };
+            let mut d_dst_ef = unsafe { d_dst_bf.transmute_mut::<VEF>() };
+            super::batch_inv::<VEF>(&d_src_ef, &mut d_dst_ef, &stream).unwrap();
+            memory_copy_async(&mut h_dst_bf, &d_dst_bf, &stream).unwrap();
+        }
+        stream.synchronize().unwrap();
+        let h_src_c0 = &h_src_bf[0..N];
+        let h_src_c1 = &h_src_bf[N..2 * N];
+        let h_dst_c0 = &h_dst_bf[0..N];
+        let h_dst_c1 = &h_dst_bf[N..2 * N];
+        for (((src_c0, src_c1), dst_c0), dst_c1) in h_src_c0.iter().zip(h_src_c1).zip(h_dst_c0).zip(h_dst_c1) {
+            let control = ExtensionField::from_coeff_in_base([*src_c0, *src_c1]);
+            let control = control.inverse().unwrap_or_default();
+            let result = ExtensionField::from_coeff_in_base([*dst_c0, *dst_c1]);
+            assert_eq!(control, result) 
+        }
+    }
+
+    #[test]
+    fn batch_inv_ef() {
+        test_batch_inv_ef(false);
+    }
+
+    #[test]
+    fn batch_inv_ef_in_place() {
+        test_batch_inv_ef(true);
     }
 
     #[test]
