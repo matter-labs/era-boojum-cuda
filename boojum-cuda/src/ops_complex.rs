@@ -1843,11 +1843,13 @@ mod tests {
         let h_src_c1 = &h_src_bf[N..2 * N];
         let h_dst_c0 = &h_dst_bf[0..N];
         let h_dst_c1 = &h_dst_bf[N..2 * N];
-        for (((src_c0, src_c1), dst_c0), dst_c1) in h_src_c0.iter().zip(h_src_c1).zip(h_dst_c0).zip(h_dst_c1) {
+        for (((src_c0, src_c1), dst_c0), dst_c1) in
+            h_src_c0.iter().zip(h_src_c1).zip(h_dst_c0).zip(h_dst_c1)
+        {
             let control = ExtensionField::from_coeff_in_base([*src_c0, *src_c1]);
             let control = control.inverse().unwrap_or_default();
             let result = ExtensionField::from_coeff_in_base([*dst_c0, *dst_c1]);
-            assert_eq!(control, result) 
+            assert_eq!(control, result)
         }
     }
 
