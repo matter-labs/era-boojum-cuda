@@ -13,8 +13,8 @@ use cudart_sys::{cudaLaunchKernel, dim3};
 
 use crate::device_structures::{
     BaseFieldDeviceType, DeviceMatrixChunkImpl, DeviceMatrixChunkMutImpl, DeviceMatrixImpl,
-    DeviceMatrixMutImpl, DeviceVectorImpl, DeviceVectorMutImpl, ExtensionFieldDeviceType,
-    MutPtrAndStride, PtrAndStride, VectorizedExtensionFieldDeviceType,
+    DeviceMatrixMutImpl, DeviceRepr, DeviceVectorImpl, DeviceVectorMutImpl,
+    ExtensionFieldDeviceType, MutPtrAndStride, PtrAndStride, VectorizedExtensionFieldDeviceType,
 };
 use crate::extension_field::{ExtensionField, VectorizedExtensionField};
 use crate::ops_cub::device_radix_sort::{get_sort_pairs_temp_storage_bytes, sort_pairs};
@@ -106,7 +106,17 @@ extern "C" {
         count: u32,
     );
 
-    fn batch_inv_kernel(src: *const GoldilocksField, dst: *mut GoldilocksField, count: u32);
+    fn batch_inv_bf_kernel(
+        src: PtrAndStride<GoldilocksField>,
+        dst: MutPtrAndStride<GoldilocksField>,
+        count: u32,
+    );
+
+    fn batch_inv_ef_kernel(
+        src: PtrAndStride<VectorizedExtensionFieldDeviceType>,
+        dst: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
+        count: u32,
+    );
 
     fn pack_variable_indexes_kernel(src: *const u64, dst: *mut u32, count: u32);
 
@@ -540,40 +550,85 @@ pub fn select(
     unsafe { KernelFourArgs::launch(select_kernel, grid_dim, block_dim, args, 0, stream) }
 }
 
-fn launch_batch_inv_kernel(
-    values: *const GoldilocksField,
-    result: *mut GoldilocksField,
+pub trait BatchInvImpl: DeviceRepr {
+    const INV_BATCH_SIZE: u32;
+    fn get_batch_inv_kernel() -> unsafe extern "C" fn(
+        PtrAndStride<<Self as DeviceRepr>::Type>,
+        MutPtrAndStride<<Self as DeviceRepr>::Type>,
+        u32,
+    );
+}
+
+impl BatchInvImpl for GoldilocksField {
+    const INV_BATCH_SIZE: u32 = 10;
+    fn get_batch_inv_kernel(
+    ) -> unsafe extern "C" fn(PtrAndStride<GoldilocksField>, MutPtrAndStride<GoldilocksField>, u32)
+    {
+        batch_inv_bf_kernel
+    }
+}
+
+impl BatchInvImpl for VectorizedExtensionField {
+    const INV_BATCH_SIZE: u32 = 10;
+    fn get_batch_inv_kernel() -> unsafe extern "C" fn(
+        PtrAndStride<VectorizedExtensionFieldDeviceType>,
+        MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
+        u32,
+    ) {
+        batch_inv_ef_kernel
+    }
+}
+
+fn launch_batch_inv_kernel<T: BatchInvImpl>(
+    values: PtrAndStride<<T as DeviceRepr>::Type>,
+    result: MutPtrAndStride<<T as DeviceRepr>::Type>,
     count: u32,
+    batch_size: u32,
     stream: &CudaStream,
 ) -> CudaResult<()> {
-    const BATCH_SIZE: u32 = 10;
     let block_dim = WARP_SIZE * 4;
-    let grid_dim = (count + BATCH_SIZE * block_dim - 1) / (BATCH_SIZE * block_dim);
+    let grid_dim = (count + batch_size * block_dim - 1) / (batch_size * block_dim);
     let block_dim: dim3 = block_dim.into();
     let grid_dim: dim3 = grid_dim.into();
     let args = (&values, &result, &count);
-    unsafe { KernelThreeArgs::launch(batch_inv_kernel, grid_dim, block_dim, args, 0, stream) }
+    unsafe {
+        KernelThreeArgs::launch(
+            T::get_batch_inv_kernel(),
+            grid_dim,
+            block_dim,
+            args,
+            0,
+            stream,
+        )
+    }
 }
 
-pub fn batch_inv(
-    src: &DeviceSlice<GoldilocksField>,
-    dst: &mut DeviceSlice<GoldilocksField>,
+pub fn batch_inv<T: BatchInvImpl>(
+    src: &DeviceSlice<T>,
+    dst: &mut DeviceSlice<T>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
     assert_eq!(src.len(), dst.len());
     assert!(dst.len() <= u32::MAX as usize);
-    launch_batch_inv_kernel(src.as_ptr(), dst.as_mut_ptr(), dst.len() as u32, stream)
+    launch_batch_inv_kernel::<T>(
+        DeviceVectorImpl::as_ptr_and_stride(src),
+        DeviceVectorMutImpl::as_mut_ptr_and_stride(dst),
+        dst.len() as u32,
+        T::INV_BATCH_SIZE,
+        stream,
+    )
 }
 
-pub fn batch_inv_in_place(
-    values: &mut DeviceSlice<GoldilocksField>,
+pub fn batch_inv_in_place<T: BatchInvImpl>(
+    values: &mut DeviceSlice<T>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
     assert!(values.len() <= u32::MAX as usize);
-    launch_batch_inv_kernel(
-        values.as_ptr(),
-        values.as_mut_ptr(),
+    launch_batch_inv_kernel::<T>(
+        DeviceVectorImpl::as_ptr_and_stride(values),
+        DeviceVectorMutImpl::as_mut_ptr_and_stride(values),
         values.len() as u32,
+        T::INV_BATCH_SIZE,
         stream,
     )
 }

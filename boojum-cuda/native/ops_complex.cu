@@ -165,8 +165,17 @@ EXTERN __global__ void select_kernel(const unsigned *indexes, const base_field *
   memory::store_cs(dst + gid, value);
 }
 
-EXTERN __global__ void batch_inv_kernel(const base_field *src, base_field *dst, const unsigned count) {
-  constexpr unsigned INV_BATCH = 10;
+template <typename T> struct InvBatch {};
+template <> struct InvBatch<base_field> {
+  static constexpr unsigned INV_BATCH = 10;
+};
+template <> struct InvBatch<extension_field> {
+  static constexpr unsigned INV_BATCH = 6;
+};
+
+template<typename T, typename SETTER, typename GETTER>
+DEVICE_FORCEINLINE void batch_inv_impl(SETTER src, GETTER dst, const unsigned count) {
+  constexpr unsigned INV_BATCH = InvBatch<T>::INV_BATCH;
 
   // ints for indexing because some bounds checks count down and check if an index drops below 0
   const int gid = int(blockIdx.x * blockDim.x + threadIdx.x);
@@ -175,8 +184,8 @@ EXTERN __global__ void batch_inv_kernel(const base_field *src, base_field *dst, 
 
   const int grid_size = int(blockDim.x * gridDim.x);
 
-  base_field inputs[INV_BATCH];
-  base_field outputs[INV_BATCH];
+  T inputs[INV_BATCH];
+  T outputs[INV_BATCH];
 
   // If count < grid size, the kernel is inefficient no matter what (because each thread processes just one element)
   // but we should still bail out if a thread has no assigned elems at all.
@@ -186,20 +195,30 @@ EXTERN __global__ void batch_inv_kernel(const base_field *src, base_field *dst, 
 #pragma unroll
   for (; i < INV_BATCH; i++, g += grid_size)
     if (g < count) {
-      inputs[i] = memory::load_cs(src + g);
+      inputs[i] = src.get(g);
       runtime_batch_size++;
     }
 
   if (runtime_batch_size < INV_BATCH) {
-    batch_inv_registers<base_field, INV_BATCH, false>(inputs, outputs, runtime_batch_size);
+    batch_inv_registers<T, INV_BATCH, false>(inputs, outputs, runtime_batch_size);
   } else {
-    batch_inv_registers<base_field, INV_BATCH, true>(inputs, outputs, runtime_batch_size);
+    batch_inv_registers<T, INV_BATCH, true>(inputs, outputs, runtime_batch_size);
   }
 
 #pragma unroll
   for (; i >= 0; i--, g -= grid_size)
     if (i < runtime_batch_size)
-      memory::store_cs(dst + g, outputs[i]);
+      dst.set(g, outputs[i]);
+}
+
+EXTERN __global__ void batch_inv_bf_kernel(vector_getter<base_field, ld_modifier::cs> src, vector_setter<base_field, st_modifier::cs> dst,
+                                           const unsigned count) {
+  batch_inv_impl<base_field>(src, dst, count);
+}
+
+EXTERN __global__ void batch_inv_ef_kernel(ef_double_vector_getter<ld_modifier::cs> src, ef_double_vector_setter<st_modifier::cs> dst,
+                                           const unsigned count) {
+  batch_inv_impl<extension_field>(src, dst, count);
 }
 
 EXTERN __global__ void pack_variable_indexes_kernel(const uint64_t *src, uint32_t *dst, const unsigned count) {
