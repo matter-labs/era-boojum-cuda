@@ -2,6 +2,8 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
+mod path;
+
 use std::backtrace::Backtrace;
 use std::error::Error;
 use std::ffi::CStr;

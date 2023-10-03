@@ -7,6 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [build-dependencies]
 boojum = { git = "https://github.com/matter-labs/era-boojum.git", branch = "main" }
+cudart-sys = { path = "../cudart-sys" }
 cmake = "^0"
 itertools = "^0"
 
