@@ -6,13 +6,19 @@ use bindgen::callbacks::{EnumVariantValue, ParseCallbacks};
 include!("src/path.rs");
 
 pub fn assert_cuda_version() {
-    use serde_json::Value;
-    let json = include_str!(concat!(cuda_path!(), "/version.json"));
-    let value: Value = serde_json::from_str(json).unwrap();
-    let version = value["cuda"]["version"].as_str().unwrap();
+    let version = option_env!("CUDA_VERSION").map_or_else(
+        || {
+            let file = fs::File::open(concat!(cuda_path!(), "/version.json"))
+                .expect("CUDA Toolkit not found");
+            let reader = std::io::BufReader::new(file);
+            let value: serde_json::Value = serde_json::from_reader(reader).unwrap();
+            dbg!(value["cuda"]["version"].as_str().unwrap().to_string())
+        },
+        |s| s.to_string(),
+    );
     assert!(
         version.starts_with("12."),
-        "CUDA {version} is not supported. Please install CUDA 12.x"
+        "CUDA Toolkit {version} is not supported. Please install CUDA Toolkit 12.x"
     );
 }
 
