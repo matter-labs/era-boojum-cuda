@@ -173,8 +173,8 @@ template <> struct InvBatch<extension_field> {
   static constexpr unsigned INV_BATCH = 6;
 };
 
-template<typename T, typename SETTER, typename GETTER>
-DEVICE_FORCEINLINE void batch_inv_impl(SETTER src, GETTER dst, const unsigned count) {
+template<typename T, typename GETTER, typename SETTER>
+DEVICE_FORCEINLINE void batch_inv_impl(GETTER src, SETTER dst, const unsigned count) {
   constexpr unsigned INV_BATCH = InvBatch<T>::INV_BATCH;
 
   // ints for indexing because some bounds checks count down and check if an index drops below 0
