@@ -13,8 +13,8 @@ use cudart_sys::{cudaLaunchKernel, dim3};
 
 use crate::device_structures::{
     BaseFieldDeviceType, DeviceMatrixChunkImpl, DeviceMatrixChunkMutImpl, DeviceMatrixImpl,
-    DeviceMatrixMutImpl, DeviceVectorImpl, DeviceVectorMutImpl, ExtensionFieldDeviceType,
-    MutPtrAndStride, PtrAndStride, VectorizedExtensionFieldDeviceType,
+    DeviceMatrixMutImpl, DeviceRepr, DeviceVectorImpl, DeviceVectorMutImpl,
+    ExtensionFieldDeviceType, MutPtrAndStride, PtrAndStride, VectorizedExtensionFieldDeviceType,
 };
 use crate::extension_field::{ExtensionField, VectorizedExtensionField};
 use crate::ops_cub::device_radix_sort::{get_sort_pairs_temp_storage_bytes, sort_pairs};
@@ -106,7 +106,17 @@ extern "C" {
         count: u32,
     );
 
-    fn batch_inv_kernel(src: *const GoldilocksField, dst: *mut GoldilocksField, count: u32);
+    fn batch_inv_bf_kernel(
+        src: PtrAndStride<GoldilocksField>,
+        dst: MutPtrAndStride<GoldilocksField>,
+        count: u32,
+    );
+
+    fn batch_inv_ef_kernel(
+        src: PtrAndStride<VectorizedExtensionFieldDeviceType>,
+        dst: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
+        count: u32,
+    );
 
     fn pack_variable_indexes_kernel(src: *const u64, dst: *mut u32, count: u32);
 
@@ -540,40 +550,85 @@ pub fn select(
     unsafe { KernelFourArgs::launch(select_kernel, grid_dim, block_dim, args, 0, stream) }
 }
 
-fn launch_batch_inv_kernel(
-    values: *const GoldilocksField,
-    result: *mut GoldilocksField,
+pub trait BatchInvImpl: DeviceRepr {
+    const INV_BATCH_SIZE: u32;
+    fn get_batch_inv_kernel() -> unsafe extern "C" fn(
+        PtrAndStride<<Self as DeviceRepr>::Type>,
+        MutPtrAndStride<<Self as DeviceRepr>::Type>,
+        u32,
+    );
+}
+
+impl BatchInvImpl for GoldilocksField {
+    const INV_BATCH_SIZE: u32 = 10;
+    fn get_batch_inv_kernel(
+    ) -> unsafe extern "C" fn(PtrAndStride<GoldilocksField>, MutPtrAndStride<GoldilocksField>, u32)
+    {
+        batch_inv_bf_kernel
+    }
+}
+
+impl BatchInvImpl for VectorizedExtensionField {
+    const INV_BATCH_SIZE: u32 = 6;
+    fn get_batch_inv_kernel() -> unsafe extern "C" fn(
+        PtrAndStride<VectorizedExtensionFieldDeviceType>,
+        MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
+        u32,
+    ) {
+        batch_inv_ef_kernel
+    }
+}
+
+fn launch_batch_inv_kernel<T: BatchInvImpl>(
+    values: PtrAndStride<<T as DeviceRepr>::Type>,
+    result: MutPtrAndStride<<T as DeviceRepr>::Type>,
     count: u32,
+    batch_size: u32,
     stream: &CudaStream,
 ) -> CudaResult<()> {
-    const BATCH_SIZE: u32 = 10;
     let block_dim = WARP_SIZE * 4;
-    let grid_dim = (count + BATCH_SIZE * block_dim - 1) / (BATCH_SIZE * block_dim);
+    let grid_dim = (count + batch_size * block_dim - 1) / (batch_size * block_dim);
     let block_dim: dim3 = block_dim.into();
     let grid_dim: dim3 = grid_dim.into();
     let args = (&values, &result, &count);
-    unsafe { KernelThreeArgs::launch(batch_inv_kernel, grid_dim, block_dim, args, 0, stream) }
+    unsafe {
+        KernelThreeArgs::launch(
+            T::get_batch_inv_kernel(),
+            grid_dim,
+            block_dim,
+            args,
+            0,
+            stream,
+        )
+    }
 }
 
-pub fn batch_inv(
-    src: &DeviceSlice<GoldilocksField>,
-    dst: &mut DeviceSlice<GoldilocksField>,
+pub fn batch_inv<T: BatchInvImpl>(
+    src: &DeviceSlice<T>,
+    dst: &mut DeviceSlice<T>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
     assert_eq!(src.len(), dst.len());
     assert!(dst.len() <= u32::MAX as usize);
-    launch_batch_inv_kernel(src.as_ptr(), dst.as_mut_ptr(), dst.len() as u32, stream)
+    launch_batch_inv_kernel::<T>(
+        DeviceVectorImpl::as_ptr_and_stride(src),
+        DeviceVectorMutImpl::as_mut_ptr_and_stride(dst),
+        dst.len() as u32,
+        T::INV_BATCH_SIZE,
+        stream,
+    )
 }
 
-pub fn batch_inv_in_place(
-    values: &mut DeviceSlice<GoldilocksField>,
+pub fn batch_inv_in_place<T: BatchInvImpl>(
+    values: &mut DeviceSlice<T>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
     assert!(values.len() <= u32::MAX as usize);
-    launch_batch_inv_kernel(
-        values.as_ptr(),
-        values.as_mut_ptr(),
+    launch_batch_inv_kernel::<T>(
+        DeviceVectorImpl::as_ptr_and_stride(values),
+        DeviceVectorMutImpl::as_mut_ptr_and_stride(values),
         values.len() as u32,
+        T::INV_BATCH_SIZE,
         stream,
     )
 }
@@ -1717,7 +1772,7 @@ mod tests {
         test_bit_reverse(true);
     }
 
-    fn test_batch_inv(in_place: bool) {
+    fn test_batch_inv_bf(in_place: bool) {
         const LOG_N: usize = 16;
         const N: usize = 1 << LOG_N;
         let h_src = Uniform::new(0, GoldilocksField::ORDER)
@@ -1730,13 +1785,13 @@ mod tests {
         if in_place {
             let mut d_values = DeviceAllocation::alloc(N).unwrap();
             memory_copy_async(&mut d_values, &h_src, &stream).unwrap();
-            super::batch_inv_in_place(&mut d_values, &stream).unwrap();
+            super::batch_inv_in_place::<GoldilocksField>(&mut d_values, &stream).unwrap();
             memory_copy_async(&mut h_dst, &d_values, &stream).unwrap();
         } else {
             let mut d_src = DeviceAllocation::alloc(N).unwrap();
             let mut d_dst = DeviceAllocation::alloc(N).unwrap();
             memory_copy_async(&mut d_src, &h_src, &stream).unwrap();
-            super::batch_inv(&d_src, &mut d_dst, &stream).unwrap();
+            super::batch_inv::<GoldilocksField>(&d_src, &mut d_dst, &stream).unwrap();
             memory_copy_async(&mut h_dst, &d_dst, &stream).unwrap();
         }
         stream.synchronize().unwrap();
@@ -1748,13 +1803,64 @@ mod tests {
     }
 
     #[test]
-    fn batch_inv() {
-        test_batch_inv(false);
+    fn batch_inv_bf() {
+        test_batch_inv_bf(false);
     }
 
     #[test]
-    fn batch_inv_in_place() {
-        test_batch_inv(true);
+    fn batch_inv_in_place_bf() {
+        test_batch_inv_bf(true);
+    }
+
+    fn test_batch_inv_ef(in_place: bool) {
+        type VEF = VectorizedExtensionField;
+        const LOG_N: usize = 16;
+        const N: usize = 1 << LOG_N;
+        let h_src_bf = Uniform::new(0, GoldilocksField::ORDER)
+            .sample_iter(&mut thread_rng())
+            .take(2 * N)
+            .map(GoldilocksField)
+            .collect_vec();
+        let mut h_dst_bf = vec![GoldilocksField::ZERO; 2 * N];
+        let stream = CudaStream::default();
+        if in_place {
+            let mut d_values_bf = DeviceAllocation::alloc(2 * N).unwrap();
+            memory_copy_async(&mut d_values_bf, &h_src_bf, &stream).unwrap();
+            let mut d_values_ef = unsafe { d_values_bf.transmute_mut::<VEF>() };
+            super::batch_inv_in_place::<VEF>(&mut d_values_ef, &stream).unwrap();
+            memory_copy_async(&mut h_dst_bf, &d_values_bf, &stream).unwrap();
+        } else {
+            let mut d_src_bf = DeviceAllocation::alloc(2 * N).unwrap();
+            let mut d_dst_bf = DeviceAllocation::alloc(2 * N).unwrap();
+            memory_copy_async(&mut d_src_bf, &h_src_bf, &stream).unwrap();
+            let d_src_ef = unsafe { d_src_bf.transmute::<VEF>() };
+            let mut d_dst_ef = unsafe { d_dst_bf.transmute_mut::<VEF>() };
+            super::batch_inv::<VEF>(&d_src_ef, &mut d_dst_ef, &stream).unwrap();
+            memory_copy_async(&mut h_dst_bf, &d_dst_bf, &stream).unwrap();
+        }
+        stream.synchronize().unwrap();
+        let h_src_c0 = &h_src_bf[0..N];
+        let h_src_c1 = &h_src_bf[N..2 * N];
+        let h_dst_c0 = &h_dst_bf[0..N];
+        let h_dst_c1 = &h_dst_bf[N..2 * N];
+        for (((src_c0, src_c1), dst_c0), dst_c1) in
+            h_src_c0.iter().zip(h_src_c1).zip(h_dst_c0).zip(h_dst_c1)
+        {
+            let control = ExtensionField::from_coeff_in_base([*src_c0, *src_c1]);
+            let control = control.inverse().unwrap_or_default();
+            let result = ExtensionField::from_coeff_in_base([*dst_c0, *dst_c1]);
+            assert_eq!(control, result)
+        }
+    }
+
+    #[test]
+    fn batch_inv_ef() {
+        test_batch_inv_ef(false);
+    }
+
+    #[test]
+    fn batch_inv_ef_in_place() {
+        test_batch_inv_ef(true);
     }
 
     #[test]

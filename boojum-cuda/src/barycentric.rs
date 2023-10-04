@@ -42,7 +42,7 @@ extern "C" {
         common_factor: *const GoldilocksField,
         w_inv_step: GoldilocksField,
         coset: GoldilocksField,
-        lagrange_coeffs: *mut GoldilocksField,
+        lagrange_coeffs: MutPtrAndStride<GoldilocksField>,
         log_count: u32,
     );
 
@@ -57,7 +57,7 @@ extern "C" {
 
     fn batch_barycentric_partial_reduce_base_at_base_kernel(
         batch_ys: PtrAndStride<GoldilocksField>,
-        lagrange_coeffs: *const GoldilocksField,
+        lagrange_coeffs: PtrAndStride<GoldilocksField>,
         partial_sums: MutPtrAndStride<GoldilocksField>,
         log_count: u32,
         num_polys: u32,
@@ -84,7 +84,6 @@ pub trait PrecomputeImpl {
     const X_IS_1_OR_2_GF_ELEMS: u32;
     type X: Clone + DeviceRepr;
     type XVec: DeviceRepr;
-    type CoeffsKernelArg;
     fn get_precompute_inv_batch() -> u32;
     fn get_common_factor_kernel() -> unsafe extern "C" fn(
         *const <Self::X as DeviceRepr>::Type,
@@ -92,15 +91,12 @@ pub trait PrecomputeImpl {
         GoldilocksField,
         u32,
     );
-    fn coeffs_to_kernel_arg(
-        lagrange_coeffs: &mut (impl DeviceVectorMutImpl<Self::XVec> + ?Sized),
-    ) -> Self::CoeffsKernelArg;
     fn get_precompute_kernel() -> unsafe extern "C" fn(
         *const <Self::X as DeviceRepr>::Type,
         *const <Self::X as DeviceRepr>::Type,
         GoldilocksField,
         GoldilocksField,
-        Self::CoeffsKernelArg,
+        MutPtrAndStride<<Self::XVec as DeviceRepr>::Type>,
         u32,
     );
     fn bit_reverse_coeffs(
@@ -117,7 +113,6 @@ impl PrecomputeImpl for PrecomputeAtBase {
     const X_IS_1_OR_2_GF_ELEMS: u32 = 1;
     type X = GoldilocksField;
     type XVec = GoldilocksField;
-    type CoeffsKernelArg = *mut GoldilocksField;
     fn get_precompute_inv_batch() -> u32 {
         10
     }
@@ -126,17 +121,12 @@ impl PrecomputeImpl for PrecomputeAtBase {
     {
         barycentric_precompute_common_factor_at_base_kernel
     }
-    fn coeffs_to_kernel_arg(
-        lagrange_coeffs: &mut (impl DeviceVectorMutImpl<GoldilocksField> + ?Sized),
-    ) -> *mut GoldilocksField {
-        lagrange_coeffs.as_mut_ptr()
-    }
     fn get_precompute_kernel() -> unsafe extern "C" fn(
         *const GoldilocksField,
         *const GoldilocksField,
         GoldilocksField,
         GoldilocksField,
-        *mut GoldilocksField,
+        MutPtrAndStride<GoldilocksField>,
         u32,
     ) {
         barycentric_precompute_lagrange_coeffs_at_base_kernel
@@ -153,7 +143,6 @@ impl PrecomputeImpl for PrecomputeAtExt {
     const X_IS_1_OR_2_GF_ELEMS: u32 = 2;
     type X = ExtensionField;
     type XVec = VectorizedExtensionField;
-    type CoeffsKernelArg = MutPtrAndStride<VectorizedExtensionFieldDeviceType>;
     fn get_precompute_inv_batch() -> u32 {
         6
     }
@@ -164,11 +153,6 @@ impl PrecomputeImpl for PrecomputeAtExt {
         u32,
     ) {
         barycentric_precompute_common_factor_at_ext_kernel
-    }
-    fn coeffs_to_kernel_arg(
-        lagrange_coeffs: &mut (impl DeviceVectorMutImpl<VectorizedExtensionField> + ?Sized),
-    ) -> MutPtrAndStride<VectorizedExtensionFieldDeviceType> {
-        lagrange_coeffs.as_mut_ptr_and_stride()
     }
     fn get_precompute_kernel() -> unsafe extern "C" fn(
         *const ExtensionFieldDeviceType,
@@ -196,14 +180,10 @@ pub trait EvalImpl {
     type X: DeviceRepr;
     type XVec: DeviceRepr;
     type YsVec: DeviceRepr;
-    type CoeffsKernelArg;
     fn get_partial_reduce_elems_per_thread() -> u32;
-    fn coeffs_to_kernel_arg(
-        lagrange_coeffs: &(impl DeviceVectorImpl<Self::XVec> + ?Sized),
-    ) -> Self::CoeffsKernelArg;
     fn get_partial_reduce_kernel() -> unsafe extern "C" fn(
         PtrAndStride<<Self::YsVec as DeviceRepr>::Type>,
-        Self::CoeffsKernelArg,
+        PtrAndStride<<Self::XVec as DeviceRepr>::Type>,
         MutPtrAndStride<<Self::XVec as DeviceRepr>::Type>,
         u32,
         u32,
@@ -221,18 +201,12 @@ impl EvalImpl for EvalBaseAtBase {
     type X = GoldilocksField;
     type XVec = GoldilocksField;
     type YsVec = GoldilocksField;
-    type CoeffsKernelArg = *const GoldilocksField;
     fn get_partial_reduce_elems_per_thread() -> u32 {
         12
     }
-    fn coeffs_to_kernel_arg(
-        lagrange_coeffs: &(impl DeviceVectorImpl<GoldilocksField> + ?Sized),
-    ) -> *const GoldilocksField {
-        lagrange_coeffs.as_ptr()
-    }
     fn get_partial_reduce_kernel() -> unsafe extern "C" fn(
         PtrAndStride<GoldilocksField>,
-        *const GoldilocksField,
+        PtrAndStride<GoldilocksField>,
         MutPtrAndStride<GoldilocksField>,
         u32,
         u32,
@@ -246,14 +220,8 @@ impl EvalImpl for EvalBaseAtExt {
     type X = ExtensionField;
     type XVec = VectorizedExtensionField;
     type YsVec = GoldilocksField;
-    type CoeffsKernelArg = PtrAndStride<VectorizedExtensionFieldDeviceType>;
     fn get_partial_reduce_elems_per_thread() -> u32 {
         6
-    }
-    fn coeffs_to_kernel_arg(
-        lagrange_coeffs: &(impl DeviceVectorImpl<VectorizedExtensionField> + ?Sized),
-    ) -> PtrAndStride<VectorizedExtensionFieldDeviceType> {
-        lagrange_coeffs.as_ptr_and_stride()
     }
     fn get_partial_reduce_kernel() -> unsafe extern "C" fn(
         PtrAndStride<GoldilocksField>,
@@ -271,14 +239,8 @@ impl EvalImpl for EvalExtAtExt {
     type X = ExtensionField;
     type XVec = VectorizedExtensionField;
     type YsVec = VectorizedExtensionField;
-    type CoeffsKernelArg = PtrAndStride<VectorizedExtensionFieldDeviceType>;
     fn get_partial_reduce_elems_per_thread() -> u32 {
         6
-    }
-    fn coeffs_to_kernel_arg(
-        lagrange_coeffs: &(impl DeviceVectorImpl<VectorizedExtensionField> + ?Sized),
-    ) -> PtrAndStride<VectorizedExtensionFieldDeviceType> {
-        lagrange_coeffs.as_ptr_and_stride()
     }
     fn get_partial_reduce_kernel() -> unsafe extern "C" fn(
         PtrAndStride<VectorizedExtensionFieldDeviceType>,
@@ -325,7 +287,7 @@ pub fn precompute_lagrange_coeffs<T: PrecomputeImpl>(
     let block_dim: dim3 = block_dim.into();
     let grid_dim: dim3 = grid_dim.into();
     let common_factor = common_factor_storage.as_ptr() as *const <T::X as DeviceRepr>::Type;
-    let dst = T::coeffs_to_kernel_arg(lagrange_coeffs);
+    let dst = lagrange_coeffs.as_mut_ptr_and_stride();
     let args = (
         &x_arg,
         &common_factor,
@@ -405,7 +367,7 @@ pub fn batch_eval<T: EvalImpl>(
     );
     let grid_dim: dim3 = grid_dim.into();
     let src = batch_ys.as_ptr_and_stride();
-    let coeffs = T::coeffs_to_kernel_arg(lagrange_coeffs);
+    let coeffs = lagrange_coeffs.as_ptr_and_stride();
     let dst = temp_storage_partial_reduce.as_mut_ptr_and_stride();
     let args = (&src, &coeffs, &dst, &log_count, &num_polys);
     unsafe {
