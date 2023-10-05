@@ -9,6 +9,7 @@ use bitflags::bitflags;
 use cudart_sys::*;
 
 use crate::event::CudaEvent;
+use crate::execution::CudaLaunchAttribute;
 use crate::result::{CudaResult, CudaResultWrap};
 
 #[repr(transparent)]
@@ -78,6 +79,15 @@ impl CudaStream {
         }
     }
 
+    pub fn get_attribute(&self, id: CudaLaunchAttributeID) -> CudaResult<CudaLaunchAttribute> {
+        let mut value = MaybeUninit::<CudaLaunchAttributeValue>::uninit();
+        unsafe {
+            cudaStreamGetAttribute(self.handle, id, value.as_mut_ptr())
+                .wrap_maybe_uninit(value)
+                .map(|val| CudaLaunchAttribute::from_id_and_value(id, val))
+        }
+    }
+
     pub fn query(&self) -> CudaResult<bool> {
         let error = unsafe { cudaStreamQuery(self.handle) };
         match error {
@@ -85,6 +95,11 @@ impl CudaStream {
             CudaError::ErrorNotReady => Ok(false),
             _ => Err(error),
         }
+    }
+
+    pub fn set_attribute(&self, attribute: CudaLaunchAttribute) -> CudaResult<()> {
+        let (id, value) = attribute.into_id_and_value();
+        unsafe { cudaStreamSetAttribute(self.handle, id, &value as *const _).wrap() }
     }
 
     pub fn synchronize(&self) -> CudaResult<()> {
