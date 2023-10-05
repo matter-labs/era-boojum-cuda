@@ -1,6 +1,8 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
+use cudart_sys::{cuda_lib_path, cuda_path};
+
 mod gates;
 mod poseidon_constants;
 mod template;
@@ -19,13 +21,7 @@ fn main() {
         .build();
     println!("cargo:rustc-link-search=native={}", dst.display());
     println!("cargo:rustc-link-lib=static=boojum-cuda-native");
-    #[cfg(target_os = "windows")]
-    println!(
-        "cargo:rustc-link-search=native={}",
-        concat!(env!("CUDA_PATH"), "/lib/x64")
-    );
-    #[cfg(target_os = "linux")]
-    println!("cargo:rustc-link-search=native=/usr/local/cuda/lib");
+    println!("cargo:rustc-link-search=native={}", cuda_lib_path!());
     println!("cargo:rustc-link-lib=cudart");
     #[cfg(target_os = "linux")]
     println!("cargo:rustc-link-lib=stdc++");

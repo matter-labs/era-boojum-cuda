@@ -3,38 +3,23 @@ use std::path::PathBuf;
 
 use bindgen::callbacks::{EnumVariantValue, ParseCallbacks};
 
-fn cuda_include_path() -> &'static str {
-    #[cfg(target_os = "windows")]
-    {
-        concat!(env!("CUDA_PATH"), "/include")
-    }
+include!("src/path.rs");
 
-    #[cfg(target_os = "linux")]
-    {
-        "/usr/local/cuda/include"
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    {
-        unimplemented!()
-    }
-}
-
-fn cuda_lib_path() -> &'static str {
-    #[cfg(target_os = "windows")]
-    {
-        concat!(env!("CUDA_PATH"), "/lib/x64")
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        "/usr/local/cuda/lib64"
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    {
-        unimplemented!()
-    }
+pub fn assert_cuda_version() {
+    let version = option_env!("CUDA_VERSION").map_or_else(
+        || {
+            let file = fs::File::open(concat!(cuda_path!(), "/version.json"))
+                .expect("CUDA Toolkit not found");
+            let reader = std::io::BufReader::new(file);
+            let value: serde_json::Value = serde_json::from_reader(reader).unwrap();
+            dbg!(value["cuda"]["version"].as_str().unwrap().to_string())
+        },
+        |s| s.to_string(),
+    );
+    assert!(
+        version.starts_with("12."),
+        "CUDA Toolkit {version} is not supported. Please install CUDA Toolkit 12.x"
+    );
 }
 
 #[derive(Debug)]
@@ -107,11 +92,9 @@ impl ParseCallbacks for CudaParseCallbacks {
 fn main() {
     #[cfg(target_os = "macos")]
     std::process::exit(0);
-    let cuda_lib_path = cuda_lib_path();
-    let cuda_runtime_api_path = PathBuf::from(cuda_include_path())
-        .join("cuda_runtime_api.h")
-        .to_string_lossy()
-        .to_string();
+    assert_cuda_version();
+    let cuda_lib_path = cuda_lib_path!();
+    let cuda_runtime_api_path = concat!(cuda_include_path!(), "/cuda_runtime_api.h");
     println!("cargo:rustc-link-search=native={cuda_lib_path}");
     println!("cargo:rustc-link-lib=cudart");
     println!("cargo:rerun-if-changed={cuda_runtime_api_path}");
