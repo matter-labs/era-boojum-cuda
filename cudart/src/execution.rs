@@ -3,6 +3,7 @@
 
 use core::ffi::c_void;
 use std::marker::PhantomData;
+use std::os::raw::{c_char, c_int, c_uint};
 use std::sync::{Arc, Weak};
 
 use cudart_sys::*;
@@ -53,6 +54,150 @@ macro_rules! kernel_args {
 
 pub use kernel_args;
 
+#[derive(Debug, Copy, Clone)]
+pub enum CudaLaunchAttribute {
+    Ignore,
+    AccessPolicyWindow(CudaAccessPolicyWindow),
+    Cooperative(bool),
+    SynchronizationPolicy(CudaSynchronizationPolicy),
+    ClusterDimension(dim3),
+    ClusterSchedulingPolicyPreference(CudaClusterSchedulingPolicy),
+    ProgrammaticStreamSerialization(bool),
+    ProgrammaticEvent(cudaLaunchAttributeValue__bindgen_ty_2),
+    Priority(i32),
+    MemSyncDomainMap(cudaLaunchMemSyncDomainMap),
+    MemSyncDomain(CudaLaunchMemSyncDomain),
+}
+
+impl CudaLaunchAttribute {
+    pub(crate) fn from_id_and_value(
+        id: CudaLaunchAttributeID,
+        value: CudaLaunchAttributeValue,
+    ) -> Self {
+        unsafe {
+            match id {
+                CudaLaunchAttributeID::Ignore => Self::Ignore,
+                CudaLaunchAttributeID::AccessPolicyWindow => {
+                    Self::AccessPolicyWindow(value.accessPolicyWindow)
+                }
+                CudaLaunchAttributeID::Cooperative => Self::Cooperative(value.cooperative != 0),
+                CudaLaunchAttributeID::SynchronizationPolicy => {
+                    Self::SynchronizationPolicy(value.syncPolicy)
+                }
+                CudaLaunchAttributeID::ClusterDimension => {
+                    let d = value.clusterDim;
+                    Self::ClusterDimension(dim3 {
+                        x: d.x,
+                        y: d.y,
+                        z: d.z,
+                    })
+                }
+                CudaLaunchAttributeID::ClusterSchedulingPolicyPreference => {
+                    Self::ClusterSchedulingPolicyPreference(value.clusterSchedulingPolicyPreference)
+                }
+                CudaLaunchAttributeID::ProgrammaticStreamSerialization => {
+                    Self::ProgrammaticStreamSerialization(
+                        value.programmaticStreamSerializationAllowed != 0,
+                    )
+                }
+                CudaLaunchAttributeID::ProgrammaticEvent => {
+                    Self::ProgrammaticEvent(value.programmaticEvent)
+                }
+                CudaLaunchAttributeID::Priority => Self::Priority(value.priority),
+                CudaLaunchAttributeID::MemSyncDomainMap => {
+                    Self::MemSyncDomainMap(value.memSyncDomainMap)
+                }
+                CudaLaunchAttributeID::MemSyncDomain => Self::MemSyncDomain(value.memSyncDomain),
+            }
+        }
+    }
+
+    pub(crate) fn into_id_and_value(self) -> (CudaLaunchAttributeID, CudaLaunchAttributeValue) {
+        match self {
+            CudaLaunchAttribute::Ignore => (
+                CudaLaunchAttributeID::Ignore,
+                CudaLaunchAttributeValue { pad: [0; 64] },
+            ),
+            CudaLaunchAttribute::AccessPolicyWindow(access_policy_window) => (
+                CudaLaunchAttributeID::AccessPolicyWindow,
+                CudaLaunchAttributeValue {
+                    accessPolicyWindow: access_policy_window,
+                },
+            ),
+            CudaLaunchAttribute::Cooperative(cooperative) => (
+                CudaLaunchAttributeID::Cooperative,
+                CudaLaunchAttributeValue {
+                    cooperative: cooperative as c_int,
+                },
+            ),
+            CudaLaunchAttribute::SynchronizationPolicy(sync_policy) => (
+                CudaLaunchAttributeID::SynchronizationPolicy,
+                CudaLaunchAttributeValue {
+                    syncPolicy: sync_policy,
+                },
+            ),
+            CudaLaunchAttribute::ClusterDimension(cluster_dim) => (
+                CudaLaunchAttributeID::ClusterDimension,
+                CudaLaunchAttributeValue {
+                    clusterDim: cudaLaunchAttributeValue__bindgen_ty_1 {
+                        x: cluster_dim.x,
+                        y: cluster_dim.y,
+                        z: cluster_dim.z,
+                    },
+                },
+            ),
+            CudaLaunchAttribute::ClusterSchedulingPolicyPreference(
+                cluster_scheduling_policy_preference,
+            ) => (
+                CudaLaunchAttributeID::ClusterSchedulingPolicyPreference,
+                CudaLaunchAttributeValue {
+                    clusterSchedulingPolicyPreference: cluster_scheduling_policy_preference,
+                },
+            ),
+            CudaLaunchAttribute::ProgrammaticStreamSerialization(
+                programmatic_stream_serialization_allowed,
+            ) => (
+                CudaLaunchAttributeID::ProgrammaticStreamSerialization,
+                CudaLaunchAttributeValue {
+                    programmaticStreamSerializationAllowed:
+                        programmatic_stream_serialization_allowed as c_int,
+                },
+            ),
+            CudaLaunchAttribute::ProgrammaticEvent(programmatic_event) => (
+                CudaLaunchAttributeID::ProgrammaticEvent,
+                CudaLaunchAttributeValue {
+                    programmaticEvent: programmatic_event,
+                },
+            ),
+            CudaLaunchAttribute::Priority(priority) => (
+                CudaLaunchAttributeID::Priority,
+                CudaLaunchAttributeValue { priority },
+            ),
+            CudaLaunchAttribute::MemSyncDomainMap(mem_sync_domain_map) => (
+                CudaLaunchAttributeID::MemSyncDomainMap,
+                CudaLaunchAttributeValue {
+                    memSyncDomainMap: mem_sync_domain_map,
+                },
+            ),
+            CudaLaunchAttribute::MemSyncDomain(mem_sync_domain) => (
+                CudaLaunchAttributeID::MemSyncDomain,
+                CudaLaunchAttributeValue {
+                    memSyncDomain: mem_sync_domain,
+                },
+            ),
+        }
+    }
+
+    fn into_raw(self) -> cudaLaunchAttribute {
+        let (id, val) = self.into_id_and_value();
+        cudaLaunchAttribute {
+            id,
+            pad: [c_char::default(); 4],
+            val,
+        }
+    }
+}
+
 pub trait Kernel: Sized {
     fn get_kernel_raw(self) -> *const c_void;
 }
@@ -76,6 +221,36 @@ pub trait KernelLaunch<'a>: Kernel {
             args.into().as_mut_ptr(),
             shared_mem,
             stream.into(),
+        )
+        .wrap()
+    }
+
+    #[allow(clippy::missing_safety_doc)]
+    unsafe fn launch_ex(
+        self,
+        grid_dim: dim3,
+        block_dim: dim3,
+        args: Self::Args,
+        shared_mem: usize,
+        stream: &CudaStream,
+        attributes: &[CudaLaunchAttribute],
+    ) -> CudaResult<()> {
+        let mut attributes = attributes
+            .iter()
+            .map(|attribute| (*attribute).into_raw())
+            .collect::<Vec<_>>();
+        let config = cudaLaunchConfig_t {
+            gridDim: grid_dim,
+            blockDim: block_dim,
+            dynamicSmemBytes: shared_mem,
+            stream: stream.into(),
+            attrs: attributes.as_mut_ptr(),
+            numAttrs: attributes.len() as c_uint,
+        };
+        cudaLaunchKernelExC(
+            &config as *const _,
+            self.get_kernel_raw(),
+            args.into().as_mut_ptr(),
         )
         .wrap()
     }

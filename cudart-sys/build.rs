@@ -55,6 +55,11 @@ impl ParseCallbacks for CudaParseCallbacks {
                 "enum cudaFuncAttribute" => strip_prefix("cudaFuncAttribute"),
                 "enum cudaFuncCache" => strip_prefix("cudaFuncCache"),
                 "enum cudaSharedMemConfig" => strip_prefix("cudaSharedMem"),
+                "enum cudaLaunchAttributeID" => strip_prefix("cudaLaunchAttribute"),
+                "enum cudaAccessProperty" => strip_prefix("cudaAccessProperty"),
+                "enum cudaSynchronizationPolicy" => strip_prefix("cudaSyncPolicy"),
+                "enum cudaClusterSchedulingPolicy" => strip_prefix("cudaClusterSchedulingPolicy"),
+                "enum cudaLaunchMemSyncDomain" => strip_prefix("cudaLaunchMemSyncDomain"),
                 _ => None,
             }
         } else {
@@ -84,6 +89,13 @@ impl ParseCallbacks for CudaParseCallbacks {
             "cudaFuncAttribute" => from("CudaFuncAttribute"),
             "cudaFuncCache" => from("CudaFuncCache"),
             "cudaSharedMemConfig" => from("CudaSharedMemConfig"),
+            "cudaLaunchAttributeID" => from("CudaLaunchAttributeID"),
+            "cudaLaunchAttributeValue" => from("CudaLaunchAttributeValue"),
+            "cudaAccessPolicyWindow" => from("CudaAccessPolicyWindow"),
+            "cudaAccessProperty" => from("CudaAccessProperty"),
+            "cudaSynchronizationPolicy" => from("CudaSynchronizationPolicy"),
+            "cudaClusterSchedulingPolicy" => from("CudaClusterSchedulingPolicy"),
+            "cudaLaunchMemSyncDomain" => from("CudaLaunchMemSyncDomain"),
             _ => None,
         }
     }
@@ -137,7 +149,9 @@ fn main() {
         .allowlist_var("cudaStreamNonBlocking")
         .allowlist_function("cudaStreamCreateWithFlags")
         .allowlist_function("cudaStreamDestroy")
+        .allowlist_function("cudaStreamGetAttribute")
         .allowlist_function("cudaStreamQuery")
+        .allowlist_function("cudaStreamSetAttribute")
         .allowlist_function("cudaStreamSynchronize")
         .allowlist_var("cudaEventWaitDefault")
         .allowlist_var("cudaEventWaitExternal")
@@ -169,6 +183,12 @@ fn main() {
         .allowlist_function("cudaFuncSetSharedMemConfig")
         .allowlist_function("cudaLaunchHostFunc")
         .allowlist_function("cudaLaunchKernel")
+        .rustified_enum("cudaLaunchAttributeID")
+        .rustified_enum("cudaAccessProperty")
+        .rustified_enum("cudaSynchronizationPolicy")
+        .rustified_enum("cudaClusterSchedulingPolicy")
+        .rustified_enum("cudaLaunchMemSyncDomain")
+        .allowlist_function("cudaLaunchKernelExC")
         // occupancy
         // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__OCCUPANCY.html
         .allowlist_function("cudaOccupancyAvailableDynamicSMemPerBlock")
