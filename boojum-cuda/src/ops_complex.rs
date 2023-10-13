@@ -1280,7 +1280,6 @@ pub fn deep_quotient_except_public_inputs(
     );
     assert_eq!(denom_at_z.slice().len(), count);
     assert_eq!(denom_at_z_omega.slice().len(), count);
-    assert_eq!(denom_at_zero.slice().len(), count);
     assert_eq!(quotient.slice().len(), count);
     let mut num_terms_at_z = 0;
     num_terms_at_z +=
@@ -1309,6 +1308,11 @@ pub fn deep_quotient_except_public_inputs(
     let num_permutation_cols = permutation_cols.cols() as u32;
     let num_partial_products = partial_products.cols() as u32;
     let num_multiplicity_cols = multiplicity_cols.cols() as u32;
+    if num_multiplicity_cols > 0 {
+        assert_eq!(denom_at_zero.slice().len(), count)
+    } else {
+        assert_eq!(denom_at_zero.slice().len(), 0)
+    }
     let num_lookup_a_polys = lookup_a_polys.cols() as u32;
     let num_lookup_b_polys = lookup_b_polys.cols() as u32;
     let num_table_cols = table_cols.cols() as u32;
