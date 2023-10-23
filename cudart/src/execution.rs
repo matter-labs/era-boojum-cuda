@@ -108,6 +108,8 @@ impl CudaLaunchAttribute {
                     Self::MemSyncDomainMap(value.memSyncDomainMap)
                 }
                 CudaLaunchAttributeID::MemSyncDomain => Self::MemSyncDomain(value.memSyncDomain),
+                #[allow(unreachable_patterns)]
+                _ => unimplemented!("Unsupported CudaLaunchAttributeID"),
             }
         }
     }
