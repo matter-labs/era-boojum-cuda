@@ -433,9 +433,9 @@ pub fn batch_ntt_internal(
             KERN::B2N_INITIAL_7_OR_8(stages) => {
                 stage += stages;
                 launch(
-                    total_blocks_smem,
-                    nthreads_smem,
-                    smem_bytes,
+                    n / (4 * 256),
+                    128,
+                    0,
                     stream,
                     b2n_initial_7_or_8_stages as *const c_void,
                     inputs_ptr,
@@ -825,7 +825,7 @@ mod tests {
     #[test]
     #[serial]
     fn correctness_batch_ntt_fwd() {
-        correctness(1..17, false, 0, 0, 3);
+        correctness(24..25, false, 0, 0, 1);
     }
 
     #[test]

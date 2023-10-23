@@ -1,5 +1,285 @@
 #pragma once // also, this file should only be compiled in one compile unit because it has __global__ definitions
 
+DEVICE_FORCEINLINE void shfl_xor_bf(base_field *vals, const unsigned i, const unsigned lane_id, const unsigned lane_mask) {
+  // Some threads need to post vals[2 * i], others need to post vals[2 * i + 1].
+  // We use a temporary to avoid calling shfls divergently, which is unsafe on pre-Volta.
+  base_field tmp{};
+  if (lane_id & lane_mask)
+    tmp = vals[2 * i];
+  else
+    tmp = vals[2 * i + 1];
+  tmp[0] = __shfl_xor_sync(0xffffffff, tmp[0], lane_mask);
+  tmp[1] = __shfl_xor_sync(0xffffffff, tmp[1], lane_mask);
+  if (lane_id & lane_mask)
+    vals[2 * i] = tmp;
+  else
+    vals[2 * i + 1] = tmp;
+}
+
+template <unsigned LOG_VALS_PER_THREAD> DEVICE_FORCEINLINE
+void b2n_initial_stages_warp(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                             const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                             const unsigned log_n, const bool inverse, const unsigned blocks_per_ntt, const unsigned log_extension_degree,
+                             const unsigned coset_idx) {
+  constexpr unsigned VALS_PER_THREAD = 1 << LOG_VALS_PER_THREAD;
+  constexpr unsigned PAIRS_PER_THREAD = VALS_PER_THREAD >> 1;
+  constexpr unsigned WARPS_PER_BLOCK = 4;
+  constexpr unsigned VALS_PER_WARP = 32 * VALS_PER_THREAD;
+  constexpr unsigned VALS_PER_BLOCK = 32 * VALS_PER_THREAD * WARPS_PER_BLOCK;
+
+  __shared__ base_field smem[VALS_PER_BLOCK];
+
+  const unsigned lane_id{threadIdx.x & 31};
+  const unsigned warp_id{threadIdx.x >> 5};
+  const unsigned ntt_idx = 0; // blockIdx.x / blocks_per_ntt;
+  const unsigned block_idx_in_ntt = blockIdx.x - ntt_idx * blocks_per_ntt;
+  const unsigned gmem_offset = ntt_idx * stride_between_input_arrays + VALS_PER_BLOCK * block_idx_in_ntt + VALS_PER_WARP * warp_id;
+  const base_field *gmem_in = gmem_inputs_matrix + gmem_offset;
+  base_field *gmem_out = gmem_outputs_matrix + gmem_offset;
+
+  auto twiddle_cache = smem + VALS_PER_WARP * warp_id;
+
+  base_field vals[VALS_PER_THREAD];
+
+#pragma unroll
+  for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+    const auto in = memory::load_cs(reinterpret_cast<const uint4*>(gmem_in + 64 * i + 2 * lane_id));
+    vals[2 * i][0] = in.x;
+    vals[2 * i][1] = in.y;
+    vals[2 * i + 1][0] = in.z;
+    vals[2 * i + 1][1] = in.w;
+  }
+
+  // cooperatively loads all the twiddles this warp needs
+  base_field *twiddles_this_stage = twiddle_cache;
+  unsigned num_twiddles_this_stage = VALS_PER_WARP >> 1;
+  unsigned exchg_region_offset = gmem_offset >> 1;
+  for (unsigned stage = 0; stage < stages_this_launch; stage++) {
+#pragma unroll
+    for (unsigned i = lane_id; i < num_twiddles_this_stage; i += 32) {
+      twiddles_this_stage[i] = get_twiddle(inverse, i + exchg_region_offset);
+    }
+    twiddles_this_stage += num_twiddles_this_stage;
+    num_twiddles_this_stage >>= 1;
+    exchg_region_offset >>= 1;
+  }
+
+  __syncwarp();
+
+  unsigned lane_mask = 1;
+  twiddles_this_stage = twiddle_cache;
+  num_twiddles_this_stage = VALS_PER_WARP >> 1;
+  for (unsigned stage = 0; stage < 6; stage++) {
+#pragma unroll
+    for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+      const auto twiddle = twiddles_this_stage[(32 * i + lane_id) >> stage];
+      exchg_dif(vals[2 * i], vals[2 * i + 1], twiddle);
+      if (stage < 5)
+        shfl_xor_bf(vals, i, lane_id, lane_mask);
+    }
+    lane_mask <<= 1;
+    twiddles_this_stage += num_twiddles_this_stage;
+    num_twiddles_this_stage >>= 1;
+  }
+
+#pragma unroll
+  for (unsigned i = 1, stage = 6; i < LOG_VALS_PER_THREAD; i++, stage++) {
+    if (stage < stages_this_launch) {
+#pragma unroll
+      for (unsigned j = 0; j < PAIRS_PER_THREAD >> i; j++) {
+        const unsigned exchg_tile_sz = 2 << i;
+        const unsigned half_exchg_tile_sz = 1 << i;
+        const auto twiddle = twiddles_this_stage[j];
+#pragma unroll
+        for (unsigned k = 0; k < half_exchg_tile_sz; k++) {
+          exchg_dif(vals[exchg_tile_sz * j + k], vals[exchg_tile_sz * j + k + half_exchg_tile_sz], twiddle);
+        }
+      }
+      twiddles_this_stage += num_twiddles_this_stage;
+      num_twiddles_this_stage >>= 1;
+    }
+  }
+
+#pragma unroll
+  for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+    // This output pattern (resulting from the above shfls) is nice, but not obvious.
+    // To see why it works, sketch the shfl stages on paper.
+    memory::store_cs(gmem_out + 64 * i + lane_id, vals[2 * i]);
+    memory::store_cs(gmem_out + 64 * i + lane_id + 32, vals[2 * i + 1]);
+  }
+}
+
+extern "C" __global__
+void b2n_initial_up_to_8_stages_warp(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                                     const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                                     const unsigned log_n, const bool inverse, const unsigned blocks_per_ntt, const unsigned log_extension_degree,
+                                     const unsigned coset_idx) {
+  b2n_initial_stages_warp<3>(gmem_inputs_matrix, gmem_outputs_matrix, stride_between_input_arrays, stride_between_output_arrays, start_stage,
+                             stages_this_launch, log_n, inverse, blocks_per_ntt, log_extension_degree, coset_idx);
+}
+
+template <unsigned LOG_VALS_PER_THREAD, unsigned LOG_INTERWARP_STAGES> DEVICE_FORCEINLINE
+void b2n_initial_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                              const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                              const unsigned log_n, const bool inverse, const unsigned blocks_per_ntt, const unsigned log_extension_degree,
+                              const unsigned coset_idx) {
+  constexpr unsigned VALS_PER_THREAD = 1 << LOG_VALS_PER_THREAD;
+  constexpr unsigned PAIRS_PER_THREAD = VALS_PER_THREAD >> 1;
+  constexpr unsigned VALS_PER_WARP = 32 * VALS_PER_THREAD;
+  constexpr unsigned WARPS_PER_BLOCK = VALS_PER_WARP >> 4;
+  constexpr unsigned VALS_PER_BLOCK = 32 * VALS_PER_THREAD * WARPS_PER_BLOCK;
+
+  __shared__ base_field smem[VALS_PER_BLOCK];
+
+  const unsigned lane_id{threadIdx.x & 31};
+  const unsigned warp_id{threadIdx.x >> 5};
+  const unsigned ntt_idx = 0; // blockIdx.x / blocks_per_ntt;
+  const unsigned block_idx_in_ntt = blockIdx.x - ntt_idx * blocks_per_ntt;
+  const unsigned gmem_offset = ntt_idx * stride_between_input_arrays + VALS_PER_BLOCK * block_idx_in_ntt + VALS_PER_WARP * warp_id;
+  const base_field *gmem_in = gmem_inputs_matrix + gmem_offset;
+  base_field *gmem_out = gmem_outputs_matrix + gmem_offset;
+
+  auto twiddle_cache = smem + VALS_PER_WARP * warp_id;
+
+  base_field vals[VALS_PER_THREAD];
+
+#pragma unroll
+  for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+    const auto pair = memory::load_cs(reinterpret_cast<const uint4*>(gmem_in + 64 * i + 2 * lane_id));
+    vals[2 * i][0] = pair.x;
+    vals[2 * i][1] = pair.y;
+    vals[2 * i + 1][0] = pair.z;
+    vals[2 * i + 1][1] = pair.w;
+  }
+
+  // cooperatively loads all the twiddles this warp needs
+  base_field *twiddles_this_stage = twiddle_cache;
+  unsigned num_twiddles_this_stage = VALS_PER_WARP >> 1;
+  unsigned exchg_region_offset = gmem_offset >> 1;
+  for (unsigned stage = 0; stage < 6 + LOG_VALS_PER_THREAD - 1; stage++) {
+#pragma unroll
+    for (unsigned i = lane_id; i < num_twiddles_this_stage; i += 32) {
+      twiddles_this_stage[i] = get_twiddle(inverse, i + exchg_region_offset);
+    }
+    twiddles_this_stage += num_twiddles_this_stage;
+    num_twiddles_this_stage >>= 1;
+    exchg_region_offset >>= 1;
+  }
+
+  __syncwarp();
+
+  unsigned lane_mask = 1;
+  twiddles_this_stage = twiddle_cache;
+  num_twiddles_this_stage = VALS_PER_WARP >> 1;
+  for (unsigned stage = 0; stage < 6; stage++) {
+#pragma unroll
+    for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+      const auto twiddle = twiddles_this_stage[(32 * i + lane_id) >> stage];
+      exchg_dif(vals[2 * i], vals[2 * i + 1], twiddle);
+      shfl_xor_bf(vals, i, lane_id, lane_mask);
+    }
+    lane_mask <<= 1;
+    twiddles_this_stage += num_twiddles_this_stage;
+    num_twiddles_this_stage >>= 1;
+  }
+
+#pragma unroll
+  for (unsigned i = 1, stage = 6; i < LOG_VALS_PER_THREAD; i++, stage++) {
+#pragma unroll
+    for (unsigned j = 0; j < PAIRS_PER_THREAD >> i; j++) {
+      const unsigned exchg_tile_sz = 2 << i;
+      const unsigned half_exchg_tile_sz = 1 << i;
+      const auto twiddle = twiddles_this_stage[j];
+#pragma unroll
+      for (unsigned k = 0; k < half_exchg_tile_sz; k++)
+        exchg_dif(vals[exchg_tile_sz * j + k], vals[exchg_tile_sz * j + k + half_exchg_tile_sz], twiddle);
+    }
+    twiddles_this_stage += num_twiddles_this_stage;
+    num_twiddles_this_stage >>= 1;
+  }
+
+  __syncwarp();
+
+#pragma unroll
+  for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+    // The output pattern (resulting from the above shfls) is nice, but not obvious.
+    // To see why it works, sketch the shfl stages on paper.
+    // TODO: Stash twiddles in registers while using smem to communicate data values
+    //if (ntt_idx != num_ntts - 1) {
+    twiddle_cache[64 * i + lane_id] = vals[2 * i];
+    twiddle_cache[64 * i + lane_id + 32] = vals[2 * i + 1];
+  }
+
+  __syncthreads();
+
+  auto pair_addr = smem + 16 * warp_id + VALS_PER_WARP * (lane_id >> 3) + 2 * (threadIdx.x & 7);
+#pragma unroll
+  for (unsigned i = 0; i < PAIRS_PER_THREAD; i++, pair_addr += 4 * VALS_PER_WARP) {
+    // TODO: Juggle twiddles here as needed
+    const auto pair = *reinterpret_cast<const uint4*>(pair_addr);
+    vals[2 * i][0] = pair.x;
+    vals[2 * i][1] = pair.y;
+    vals[2 * i + 1][0] = pair.z;
+    vals[2 * i + 1][1] = pair.w;
+  }
+
+  // if (ntt_idx != num_ntts - 1)
+  //   __syncthreads();
+
+  lane_mask = 8;
+  exchg_region_offset = ((blockIdx.x * WARPS_PER_BLOCK) >> 1) + (lane_id & 16);
+  unsigned first_interwarp_stage = 6 + LOG_VALS_PER_THREAD - 1;
+  for (unsigned s = 0; s < first_interwarp_stage + LOG_INTERWARP_STAGES; s++) {
+#pragma unroll
+    for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+      // TODO: Handle these cooperatively
+      const auto twiddle = get_twiddle(inverse, (exchg_region_offset + 2 * i) >> s);
+      shfl_xor_bf(vals, i, lane_id, lane_mask);
+      exchg_dif(vals[2 * i], vals[2 * i + 1], twiddle);
+    }
+    lane_mask <<= 1;
+  }
+
+#pragma unroll
+  for (unsigned i = 1, stage = 6; i < LOG_VALS_PER_THREAD; i++, stage++) {
+#pragma unroll
+    for (unsigned j = 0; j < PAIRS_PER_THREAD >> i; j++) {
+      const unsigned exchg_tile_sz = 2 << i;
+      const unsigned half_exchg_tile_sz = 1 << i;
+      const auto twiddle = twiddles_this_stage[j];
+#pragma unroll
+      for (unsigned k = 0; k < half_exchg_tile_sz; k++)
+        exchg_dif(vals[exchg_tile_sz * j + k], vals[exchg_tile_sz * j + k + half_exchg_tile_sz], twiddle);
+    }
+  }
+
+#pragma unroll
+  for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+    // This output pattern (resulting from the above shfls) is nice, but not obvious.
+    // To see why it works, sketch the shfl stages on paper.
+    memory::store_cs(gmem_out + 64 * i + lane_id, vals[2 * i]);
+    memory::store_cs(gmem_out + 64 * i + lane_id + 32, vals[2 * i + 1]);
+  }
+}
+
+extern "C" __global__
+void b2n_initial_up_to_12_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                                      const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                                      const unsigned log_n, const bool inverse, const unsigned blocks_per_ntt, const unsigned log_extension_degree,
+                                      const unsigned coset_idx) {
+  b2n_initial_stages_block<3, 4>(gmem_inputs_matrix, gmem_outputs_matrix, stride_between_input_arrays, stride_between_output_arrays, start_stage,
+                                 stages_this_launch, log_n, inverse, blocks_per_ntt, log_extension_degree, coset_idx);
+}
+
+extern "C" __global__
+void b2n_noninitial_up_to_8_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                                         const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                                         const unsigned log_n, const bool inverse, const unsigned blocks_per_ntt, const unsigned log_extension_degree,
+                                         const unsigned coset_idx) {
+  // b2n_noninitial_stages_block<3>(gmem_inputs_matrix, gmem_outputs_matrix, stride_between_input_arrays, stride_between_output_arrays, start_stage,
+  //                                stages_this_launch, log_n, inverse, blocks_per_ntt, log_extension_degree, coset_idx);
+}
+
 // I bet there are ways to write these macros more concisely,
 // but the structure is fairly readable and easy to edit.
 #define THREE_REGISTER_STAGES_B2N(SKIP_FIRST)                                                                                                                  \
