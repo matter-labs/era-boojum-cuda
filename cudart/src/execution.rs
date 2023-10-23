@@ -454,9 +454,9 @@ pub struct HostFn<'a> {
 }
 
 impl<'a> HostFn<'a> {
-    pub fn new(func: impl Fn() + Send + 'a) -> Self {
+    pub fn new(func: impl Fn() + Send + Sync + 'a) -> Self {
         Self {
-            arc: Arc::new(Box::new(func) as Box<dyn Fn() + Send>),
+            arc: Arc::new(Box::new(func) as Box<dyn Fn() + Send + Sync>),
         }
     }
 }
