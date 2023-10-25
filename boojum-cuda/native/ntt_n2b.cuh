@@ -1,460 +1,521 @@
 #pragma once // also, this file should only be compiled in one compile unit because it has __global__ definitions
 
-#define THREE_REGISTER_STAGES_N2B(SKIP_THIRD)                                                                                                                  \
-  {                                                                                                                                                            \
-    /* first stage of this set-of-3 stages */                                                                                                                  \
-    const auto t0 = get_twiddle(inverse, thread_exchg_region);                                                                                                 \
-    exchg_dit(reg_vals[0], reg_vals[4], t0);                                                                                                                   \
-    exchg_dit(reg_vals[1], reg_vals[5], t0);                                                                                                                   \
-    exchg_dit(reg_vals[2], reg_vals[6], t0);                                                                                                                   \
-    exchg_dit(reg_vals[3], reg_vals[7], t0);                                                                                                                   \
-    /* second stage of this set-of-3 stages */                                                                                                                 \
-    thread_exchg_region *= 2;                                                                                                                                  \
-    const auto t1 = get_twiddle(inverse, thread_exchg_region);                                                                                                 \
-    const auto t2 = get_twiddle(inverse, thread_exchg_region + 1);                                                                                             \
-    exchg_dit(reg_vals[0], reg_vals[2], t1);                                                                                                                   \
-    exchg_dit(reg_vals[1], reg_vals[3], t1);                                                                                                                   \
-    exchg_dit(reg_vals[4], reg_vals[6], t2);                                                                                                                   \
-    exchg_dit(reg_vals[5], reg_vals[7], t2);                                                                                                                   \
-    if (!(SKIP_THIRD)) {                                                                                                                                       \
-      /* third stage of this set-of-3 stages */                                                                                                                \
-      thread_exchg_region *= 2;                                                                                                                                \
-      const auto t3 = get_twiddle(inverse, thread_exchg_region);                                                                                               \
-      const auto t4 = get_twiddle(inverse, thread_exchg_region + 1);                                                                                           \
-      const auto t5 = get_twiddle(inverse, thread_exchg_region + 2);                                                                                           \
-      const auto t6 = get_twiddle(inverse, thread_exchg_region + 3);                                                                                           \
-      exchg_dit(reg_vals[0], reg_vals[1], t3);                                                                                                                 \
-      exchg_dit(reg_vals[2], reg_vals[3], t4);                                                                                                                 \
-      exchg_dit(reg_vals[4], reg_vals[5], t5);                                                                                                                 \
-      exchg_dit(reg_vals[6], reg_vals[7], t6);                                                                                                                 \
-    }                                                                                                                                                          \
-  }
+// This kernel basically reverses the pattern of the b2n_initial_stages_warp kernel.
+template <unsigned LOG_VALS_PER_THREAD> DEVICE_FORCEINLINE
+void n2b_final_stages_warp(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                           const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                           const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
+                           const unsigned coset_idx) {
+  constexpr unsigned VALS_PER_THREAD = 1 << LOG_VALS_PER_THREAD;
+  constexpr unsigned PAIRS_PER_THREAD = VALS_PER_THREAD >> 1;
+  constexpr unsigned VALS_PER_WARP = 32 * VALS_PER_THREAD;
+  constexpr unsigned LOG_VALS_PER_BLOCK = 5 + LOG_VALS_PER_THREAD + 2;
+  constexpr unsigned VALS_PER_BLOCK = 1 << LOG_VALS_PER_BLOCK;
 
-#define TWO_REGISTER_STAGES_N2B(SKIP_FIRST)                                                                                                                    \
-  {                                                                                                                                                            \
-    unsigned tmp_thread_exchg_region = thread_exchg_region;                                                                                                    \
-    if (!(SKIP_FIRST)) {                                                                                                                                       \
-      /* first stage of this set-of-2 stages */                                                                                                                \
-      const auto t0 = get_twiddle(inverse, tmp_thread_exchg_region);                                                                                           \
-      exchg_dit(reg_vals[0], reg_vals[2], t0);                                                                                                                 \
-      exchg_dit(reg_vals[1], reg_vals[3], t0);                                                                                                                 \
-    }                                                                                                                                                          \
-    /* second stage of this set-of-2 stages */                                                                                                                 \
-    tmp_thread_exchg_region *= 2;                                                                                                                              \
-    const auto t1 = get_twiddle(inverse, tmp_thread_exchg_region);                                                                                             \
-    const auto t2 = get_twiddle(inverse, tmp_thread_exchg_region + 1);                                                                                         \
-    exchg_dit(reg_vals[0], reg_vals[1], t1);                                                                                                                   \
-    exchg_dit(reg_vals[2], reg_vals[3], t2);                                                                                                                   \
-  }
+  __shared__ base_field smem[VALS_PER_BLOCK];
 
-#define ONE_EXTRA_STAGE_N2B                                                                                                                                    \
-  {                                                                                                                                                            \
-    const unsigned intrablock_exchg_region = (warp_id >> 1);                                                                                                   \
-    const unsigned smem_logical_offset = (warp_id & 1) * 32 + lane_id;                                                                                         \
-    const unsigned offset = intrablock_exchg_region * 512 + smem_logical_offset;                                                                               \
-    for (int i = 0; i < 4; i++) {                                                                                                                              \
-      reg_vals[i] = memory::load_cs(gmem_input + offset + i * 64);                                                                                             \
-      reg_vals[i + 4] = memory::load_cs(gmem_input + offset + i * 64 + 256);                                                                                   \
-    }                                                                                                                                                          \
-    const auto t0 = get_twiddle(inverse, 8 * block_idx_in_ntt + intrablock_exchg_region);                                                                      \
-    exchg_dit(reg_vals[0], reg_vals[4], t0);                                                                                                                   \
-    exchg_dit(reg_vals[1], reg_vals[5], t0);                                                                                                                   \
-    exchg_dit(reg_vals[2], reg_vals[6], t0);                                                                                                                   \
-    exchg_dit(reg_vals[3], reg_vals[7], t0);                                                                                                                   \
-    const unsigned offset_padded = intrablock_exchg_region * 2 * PADDED_WARP_SCRATCH_SIZE;                                                                     \
-    for (int i = 0; i < 4; i++) {                                                                                                                              \
-      const unsigned idx = offset_padded + PAD(smem_logical_offset + i * 64);                                                                                  \
-      smem[idx] = reg_vals[i];                                                                                                                                 \
-      smem[idx + PADDED_WARP_SCRATCH_SIZE] = reg_vals[i + 4];                                                                                                  \
-    }                                                                                                                                                          \
-  }
-
-#define TWO_EXTRA_STAGES_N2B                                                                                                                                   \
-  {                                                                                                                                                            \
-    const unsigned intrablock_exchg_region = (warp_id >> 2);                                                                                                   \
-    const unsigned smem_logical_offset = (warp_id & 3) * 32 + lane_id;                                                                                         \
-    const unsigned offset = intrablock_exchg_region * 1024 + smem_logical_offset;                                                                              \
-    for (int i = 0; i < 4; i++) {                                                                                                                              \
-      reg_vals[i] = memory::load_cs(gmem_input + offset + i * 128);                                                                                            \
-      reg_vals[i + 4] = memory::load_cs(gmem_input + offset + i * 128 + 512);                                                                                  \
-    }                                                                                                                                                          \
-    unsigned global_exchg_region = 4 * block_idx_in_ntt + intrablock_exchg_region;                                                                             \
-    const auto t0 = get_twiddle(inverse, global_exchg_region);                                                                                                 \
-    global_exchg_region *= 2;                                                                                                                                  \
-    const auto t1 = get_twiddle(inverse, global_exchg_region);                                                                                                 \
-    const auto t2 = get_twiddle(inverse, global_exchg_region + 1);                                                                                             \
-    exchg_dit(reg_vals[0], reg_vals[4], t0);                                                                                                                   \
-    exchg_dit(reg_vals[1], reg_vals[5], t0);                                                                                                                   \
-    exchg_dit(reg_vals[2], reg_vals[6], t0);                                                                                                                   \
-    exchg_dit(reg_vals[3], reg_vals[7], t0);                                                                                                                   \
-    exchg_dit(reg_vals[0], reg_vals[2], t1);                                                                                                                   \
-    exchg_dit(reg_vals[1], reg_vals[3], t1);                                                                                                                   \
-    exchg_dit(reg_vals[4], reg_vals[6], t2);                                                                                                                   \
-    exchg_dit(reg_vals[5], reg_vals[7], t2);                                                                                                                   \
-    const unsigned offset_padded = intrablock_exchg_region * 4 * PADDED_WARP_SCRATCH_SIZE;                                                                     \
-    for (int i = 0; i < 2; i++) {                                                                                                                              \
-      for (int j = 0; j < 2; j++) {                                                                                                                            \
-        const unsigned idx = offset_padded + PAD(smem_logical_offset + j * 128) + i * PADDED_WARP_SCRATCH_SIZE;                                                \
-        smem[idx] = reg_vals[2 * i + j];                                                                                                                       \
-        smem[idx + 2 * PADDED_WARP_SCRATCH_SIZE] = reg_vals[2 * i + j + 4];                                                                                    \
-      }                                                                                                                                                        \
-    }                                                                                                                                                          \
-  }
-
-#define THREE_OR_FOUR_EXTRA_STAGES_N2B(THREE_STAGES)                                                                                                           \
-  {                                                                                                                                                            \
-    const unsigned intrablock_exchg_region = (warp_id >> 3);                                                                                                   \
-    const unsigned smem_logical_offset = (warp_id & 7) * 32 + lane_id;                                                                                         \
-    const unsigned offset_padded = intrablock_exchg_region * 8 * PADDED_WARP_SCRATCH_SIZE + PAD(smem_logical_offset);                                          \
-    if ((THREE_STAGES)) {                                                                                                                                      \
-      const unsigned offset = intrablock_exchg_region * 2048 + smem_logical_offset;                                                                            \
-      for (int i = 0; i < 4; i++) {                                                                                                                            \
-        reg_vals[i] = memory::load_cs(gmem_input + offset + i * 256);                                                                                          \
-        reg_vals[i + 4] = memory::load_cs(gmem_input + offset + i * 256 + 1024);                                                                               \
-      }                                                                                                                                                        \
-    } else {                                                                                                                                                   \
-      const auto t0 = get_twiddle(inverse, block_idx_in_ntt);                                                                                                  \
-      int i = threadIdx.x;                                                                                                                                     \
-      int i_padded = (threadIdx.x >> 8) * PADDED_WARP_SCRATCH_SIZE + PAD(threadIdx.x & 255);                                                                   \
-      for (; i < 2048; i += 512, i_padded += 2 * PADDED_WARP_SCRATCH_SIZE) {                                                                                   \
-        reg_vals[0] = memory::load_cs(gmem_output + i);                                                                                                        \
-        reg_vals[1] = memory::load_cs(gmem_output + i + 2048);                                                                                                 \
-        exchg_dit(reg_vals[0], reg_vals[1], t0);                                                                                                               \
-        smem[i_padded] = reg_vals[0];                                                                                                                          \
-        smem[i_padded + 8 * PADDED_WARP_SCRATCH_SIZE] = reg_vals[1];                                                                                           \
-      }                                                                                                                                                        \
-      /* in theory it's possible to avoid full __syncthreads() here, see THREE_OR_FOUR_EXTRA_STAGES_B2N */                                                     \
-      __syncthreads();                                                                                                                                         \
-      for (int i = 0; i < 4; i++) {                                                                                                                            \
-        const unsigned idx = offset_padded + i * PADDED_WARP_SCRATCH_SIZE;                                                                                     \
-        reg_vals[i] = smem[idx];                                                                                                                               \
-        reg_vals[i + 4] = smem[idx + 4 * PADDED_WARP_SCRATCH_SIZE];                                                                                            \
-      }                                                                                                                                                        \
-    }                                                                                                                                                          \
-    unsigned global_exchg_region = 2 * block_idx_in_ntt + intrablock_exchg_region;                                                                             \
-    const auto t0 = get_twiddle(inverse, global_exchg_region);                                                                                                 \
-    global_exchg_region *= 2;                                                                                                                                  \
-    const auto t1 = get_twiddle(inverse, global_exchg_region);                                                                                                 \
-    const auto t2 = get_twiddle(inverse, global_exchg_region + 1);                                                                                             \
-    global_exchg_region *= 2;                                                                                                                                  \
-    const auto t3 = get_twiddle(inverse, global_exchg_region);                                                                                                 \
-    const auto t4 = get_twiddle(inverse, global_exchg_region + 1);                                                                                             \
-    const auto t5 = get_twiddle(inverse, global_exchg_region + 2);                                                                                             \
-    const auto t6 = get_twiddle(inverse, global_exchg_region + 3);                                                                                             \
-    exchg_dit(reg_vals[0], reg_vals[4], t0);                                                                                                                   \
-    exchg_dit(reg_vals[1], reg_vals[5], t0);                                                                                                                   \
-    exchg_dit(reg_vals[2], reg_vals[6], t0);                                                                                                                   \
-    exchg_dit(reg_vals[3], reg_vals[7], t0);                                                                                                                   \
-    exchg_dit(reg_vals[0], reg_vals[2], t1);                                                                                                                   \
-    exchg_dit(reg_vals[1], reg_vals[3], t1);                                                                                                                   \
-    exchg_dit(reg_vals[4], reg_vals[6], t2);                                                                                                                   \
-    exchg_dit(reg_vals[5], reg_vals[7], t2);                                                                                                                   \
-    exchg_dit(reg_vals[0], reg_vals[1], t3);                                                                                                                   \
-    exchg_dit(reg_vals[2], reg_vals[3], t4);                                                                                                                   \
-    exchg_dit(reg_vals[4], reg_vals[5], t5);                                                                                                                   \
-    exchg_dit(reg_vals[6], reg_vals[7], t6);                                                                                                                   \
-    for (int i = 0; i < 4; i++) {                                                                                                                              \
-      const unsigned idx = offset_padded + i * PADDED_WARP_SCRATCH_SIZE;                                                                                       \
-      smem[idx] = reg_vals[i];                                                                                                                                 \
-      smem[idx + 4 * PADDED_WARP_SCRATCH_SIZE] = reg_vals[i + 4];                                                                                              \
-    }                                                                                                                                                          \
-  }
-
-extern "C" __launch_bounds__(512, 2) __global__
-    void n2b_final_7_or_8_stages(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
-                                 const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
-                                 const unsigned log_n, const bool inverse, const unsigned blocks_per_ntt, const unsigned log_extension_degree,
-                                 const unsigned coset_idx) {
-  extern __shared__ base_field smem[]; // 4096 elems
-
-  const unsigned tile_stride{16};
-  const unsigned lane_in_tile = threadIdx.x & 15;
   const unsigned lane_id{threadIdx.x & 31};
   const unsigned warp_id{threadIdx.x >> 5};
-  const unsigned ntt_idx = blockIdx.x / blocks_per_ntt;
-  const unsigned block_idx_in_ntt = blockIdx.x - ntt_idx * blocks_per_ntt;
-  const base_field *gmem_input = gmem_inputs_matrix + ntt_idx * stride_between_input_arrays + 4096 * block_idx_in_ntt;
-  base_field *gmem_output = gmem_outputs_matrix + ntt_idx * stride_between_output_arrays + 4096 * block_idx_in_ntt;
+  const unsigned gmem_offset = VALS_PER_BLOCK * blockIdx.x + VALS_PER_WARP * warp_id;
+  const base_field *gmem_in = gmem_inputs_matrix + gmem_offset + NTTS_PER_BLOCK * stride_between_input_arrays * blockIdx.y;
+  base_field *gmem_out = gmem_outputs_matrix + gmem_offset + NTTS_PER_BLOCK * stride_between_output_arrays * blockIdx.y;
 
-  {
-    // maybe some memcpy_asyncs could micro-optimize this
-    // maybe an arrive-wait barrier could micro-optimize the start_stage > 0 case
-    base_field reg_vals[8];
-#pragma unroll 8
-    for (unsigned i = 0, t = warp_id * 256 + lane_id; i < 8; i++, t += 32) {
-      const unsigned tile = t >> 4;
-      const unsigned g = tile * tile_stride + lane_in_tile;
-      reg_vals[i] = memory::load_cs(gmem_input + g);
+  auto twiddle_cache = smem + VALS_PER_WARP * warp_id;
+
+  base_field vals[VALS_PER_THREAD];
+
+  load_initial_twiddles_warp<VALS_PER_WARP, LOG_VALS_PER_THREAD>(twiddle_cache, lane_id, gmem_offset, inverse);
+
+  const unsigned bound = std::min(NTTS_PER_BLOCK, num_ntts - NTTS_PER_BLOCK * blockIdx.y);
+  for (unsigned ntt_idx = 0; ntt_idx < bound;
+       ntt_idx++, gmem_in += stride_between_input_arrays, gmem_out += stride_between_output_arrays) {
+#pragma unroll
+    for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+      vals[2 * i] = memory::load_cs(gmem_in + 64 * i + lane_id);
+      vals[2 * i + 1] = memory::load_cs(gmem_in + 64 * i + lane_id + 32);
     }
-#pragma unroll 8
-    for (unsigned i = 0, t = warp_id * 256 + lane_id; i < 8; i++, t += 32) {
-      // puts each warp's data in its assigned smem region
-      const unsigned s = (t >> 8) * PADDED_WARP_SCRATCH_SIZE + PAD(t & 255);
-      memory::store(smem + s, reg_vals[i]);
-    }
-  }
 
-  __syncwarp();
-
-  unsigned warp_exchg_region = block_idx_in_ntt * 16 + warp_id;
-  base_field reg_vals[8];
-  base_field *warp_scratch = smem + PADDED_WARP_SCRATCH_SIZE * warp_id;
-
-  unsigned thread_exchg_region = warp_exchg_region;
-  for (int j = 0; j < 64; j += 32) {
-    for (int i = 0; i < 4; i++)
-      reg_vals[i] = warp_scratch[PAD(lane_id + 64 * i + j)];
-    TWO_REGISTER_STAGES_N2B((stages_this_launch == 7))
-    for (int i = 0; i < 4; i++)
-      warp_scratch[PAD(lane_id + 64 * i + j)] = reg_vals[i];
-  }
-  warp_exchg_region *= 4;
-
-  __syncwarp();
-
-  thread_exchg_region = warp_exchg_region + (lane_id >> 3);
-  const unsigned vals_start = 64 * (lane_id >> 3) + (lane_id & 7);
-  for (int i = 0; i < 8; i++)
-    reg_vals[i] = warp_scratch[PAD(vals_start + 8 * i)];
-  THREE_REGISTER_STAGES_N2B(false)
-  for (int i = 0; i < 8; i++)
-    warp_scratch[PAD(vals_start + 8 * i)] = reg_vals[i];
-  warp_exchg_region *= 8;
-
-  __syncwarp();
-
-  thread_exchg_region = warp_exchg_region + lane_id;
-  for (int i = 0; i < 8; i++)
-    reg_vals[i] = warp_scratch[PAD(lane_id * 8 + i)];
-  THREE_REGISTER_STAGES_N2B(false)
-  for (int i = 0; i < 8; i++)
-    warp_scratch[PAD(lane_id * 8 + i)] = reg_vals[i];
-
-  __syncwarp();
-
-// unroll 2 and unroll 4 give comparable perf. Stores don't incur a stall so it's not as important to ILP them.
-#pragma unroll 1
-  for (unsigned i = 0, t = warp_id * 256 + lane_id; i < 8; i++, t += 32) {
-    const unsigned tile = t >> 4;
-    const unsigned s = (t >> 8) * PADDED_WARP_SCRATCH_SIZE + PAD(t & 255);
-    auto val = smem[s];
-    const unsigned g = tile * tile_stride + lane_in_tile;
-    if (inverse) {
-      val = base_field::mul(val, inv_sizes[log_n]);
-      if (log_extension_degree) {
-        const unsigned idx = __brev(g + 4096 * block_idx_in_ntt) >> (32 - log_n);
-        if (coset_idx) {
-          const unsigned shift = OMEGA_LOG_ORDER - log_n - log_extension_degree;
-          const unsigned offset = coset_idx << shift;
-          auto power_of_w = get_power_of_w(idx * offset, true);
-          val = base_field::mul(val, power_of_w);
+    base_field *twiddles_this_stage = twiddle_cache + VALS_PER_WARP - 2;
+    unsigned num_twiddles_this_stage = 1;
+    for (unsigned i = 0; i < LOG_VALS_PER_THREAD - 1; i++) {
+#pragma unroll
+      for (unsigned j = 0; j < (1 << i); j++) {
+        const unsigned exchg_tile_sz = VALS_PER_THREAD >> i;
+        const unsigned half_exchg_tile_sz = exchg_tile_sz >> 1;
+        const auto twiddle = twiddles_this_stage[j];
+#pragma unroll
+        for (unsigned k = 0; k < half_exchg_tile_sz; k++) {
+          exchg_dit(vals[exchg_tile_sz * j + k], vals[exchg_tile_sz * j + k + half_exchg_tile_sz], twiddle);
         }
-        auto power_of_g = get_power_of_g(idx, true);
-        val = base_field::mul(val, power_of_g);
+      }
+      num_twiddles_this_stage <<= 1;
+      twiddles_this_stage -= num_twiddles_this_stage;
+    }
+
+    unsigned lane_mask = 16;
+    for (unsigned stage = 0, s = 5; stage < 6; stage++, s--) {
+#pragma unroll
+      for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+        const auto twiddle = twiddles_this_stage[(32 * i + lane_id) >> s];
+        exchg_dit(vals[2 * i], vals[2 * i + 1], twiddle);
+        if (stage < 5)
+          shfl_xor_bf(vals, i, lane_id, lane_mask);
+      }
+      lane_mask >>= 1;
+      num_twiddles_this_stage <<= 1;
+      twiddles_this_stage -= num_twiddles_this_stage;
+    }
+
+    if (inverse) {
+#pragma unroll
+      for (unsigned i = 0; i < VALS_PER_THREAD; i++)
+        vals[i] = base_field::mul(vals[i], inv_sizes[log_n]);
+//       if (log_extension_degree) {
+//         if (coset_idx) {
+//           const unsigned shift = OMEGA_LOG_ORDER - log_n - log_extension_degree;
+//           const unsigned offset = coset_idx << shift;
+// #pragma unroll
+//           for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
+//             const unsigned idx = __brev(gmem_offset + 64 * (i >> 1) + 2 * lane_id + (i & 1)) >> (32 - log_n);
+//             auto power_of_w = get_power_of_w(idx * offset, true);
+//             vals[i] = base_field::mul(vals[i], power_of_w);
+//           }
+//         }
+// #pragma unroll
+//         for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
+//           const unsigned idx = __brev(gmem_offset + 64 * (i >> 1) + 2 * lane_id + (i & 1)) >> (32 - log_n);
+//           auto power_of_g = get_power_of_g(idx, true);
+//           vals[i] = base_field::mul(vals[i], power_of_g);
+//         }
+//       }
+    }
+
+#pragma unroll
+    for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+      const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
+      memory::store_cs(reinterpret_cast<uint4*>(gmem_out + 64 * i + 2 * lane_id), out);
+    }
+  }
+}
+
+// extern "C" __launch_bounds__(128, 8) __global__
+extern "C" __global__
+void n2b_final_8_stages_warp(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                             const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                             const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
+                             const unsigned coset_idx) {
+  n2b_final_stages_warp<3>(gmem_inputs_matrix, gmem_outputs_matrix, stride_between_input_arrays, stride_between_output_arrays, start_stage,
+                           stages_this_launch, log_n, inverse, num_ntts, log_extension_degree, coset_idx);
+}
+
+extern "C" __global__
+void n2b_final_7_stages_warp(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                             const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                             const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
+                             const unsigned coset_idx) {
+  n2b_final_stages_warp<2>(gmem_inputs_matrix, gmem_outputs_matrix, stride_between_input_arrays, stride_between_output_arrays, start_stage,
+                           stages_this_launch, log_n, inverse, num_ntts, log_extension_degree, coset_idx);
+}
+
+// This kernel basically reverses the pattern of the b2n_initial_stages_block kernel.
+template <unsigned LOG_VALS_PER_THREAD> DEVICE_FORCEINLINE
+void n2b_final_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                            const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                            const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
+                            const unsigned coset_idx) {
+  constexpr unsigned VALS_PER_THREAD = 1 << LOG_VALS_PER_THREAD;
+  constexpr unsigned PAIRS_PER_THREAD = VALS_PER_THREAD >> 1;
+  constexpr unsigned VALS_PER_WARP = 32 * VALS_PER_THREAD;
+  constexpr unsigned WARPS_PER_BLOCK = VALS_PER_WARP >> 4;
+  constexpr unsigned VALS_PER_BLOCK = 32 * VALS_PER_THREAD * WARPS_PER_BLOCK;
+  constexpr unsigned MAX_STAGES_THIS_LAUNCH = 2 * (LOG_VALS_PER_THREAD + 5) - 4;
+
+  __shared__ base_field smem[VALS_PER_BLOCK];
+
+  const unsigned lane_id{threadIdx.x & 31};
+  const unsigned warp_id{threadIdx.x >> 5};
+  const unsigned gmem_block_offset = VALS_PER_BLOCK * blockIdx.x;
+  const unsigned gmem_offset = gmem_block_offset + VALS_PER_WARP * warp_id;
+  // annoyingly scrambled, but should be coalesced overall
+  const unsigned gmem_in_thread_offset = 16 * warp_id + VALS_PER_WARP * (lane_id >> 4) + 2 * (lane_id & 7) + ((lane_id >> 3) & 1);
+  const base_field *gmem_in = gmem_inputs_matrix + gmem_block_offset + gmem_in_thread_offset +
+                              NTTS_PER_BLOCK * stride_between_input_arrays * blockIdx.y;
+  base_field *gmem_out = gmem_outputs_matrix + gmem_offset + NTTS_PER_BLOCK * stride_between_output_arrays * blockIdx.y;
+
+  auto twiddle_cache = smem + VALS_PER_WARP * warp_id;
+
+  base_field vals[VALS_PER_THREAD];
+
+  const unsigned bound = std::min(NTTS_PER_BLOCK, num_ntts - NTTS_PER_BLOCK * blockIdx.y);
+  for (unsigned ntt_idx = 0; ntt_idx < bound;
+       ntt_idx++, gmem_in += stride_between_input_arrays, gmem_out += stride_between_output_arrays) {
+#pragma unroll
+    for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+      vals[2 * i] = memory::load_cs(gmem_in + 4 * i * VALS_PER_WARP);
+      vals[2 * i + 1] = memory::load_cs(gmem_in + (4 * i + 2) * VALS_PER_WARP);
+    }
+
+    const unsigned stages_to_skip = MAX_STAGES_THIS_LAUNCH - stages_this_launch;
+    unsigned exchg_region_offset = blockIdx.x;
+    for (unsigned i = 0; i < LOG_VALS_PER_THREAD - 1; i++) {
+      if (i >= stages_to_skip) {
+#pragma unroll
+        for (unsigned j = 0; j < (1 << i); j++) {
+          const unsigned exchg_tile_sz = VALS_PER_THREAD >> i;
+          const unsigned half_exchg_tile_sz = exchg_tile_sz >> 1;
+          const auto twiddle = get_twiddle(inverse, exchg_region_offset + j);
+#pragma unroll
+          for (unsigned k = 0; k < half_exchg_tile_sz; k++)
+            exchg_dit(vals[exchg_tile_sz * j + k], vals[exchg_tile_sz * j + k + half_exchg_tile_sz], twiddle);
+        }
+      }
+      exchg_region_offset <<= 1;
+    }
+
+    unsigned lane_mask = 16;
+    unsigned halfwarp_id = lane_id >> 4;
+    for (unsigned s = 0; s < 2; s++) {
+      if ((s + LOG_VALS_PER_THREAD - 1) >= stages_to_skip) {
+#pragma unroll
+        for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+          // TODO: Handle these cooperatively?
+          const auto twiddle = get_twiddle(inverse, exchg_region_offset + ((2 * i + halfwarp_id) >> (1 - s)));
+          exchg_dit(vals[2 * i], vals[2 * i + 1], twiddle);
+          shfl_xor_bf(vals, i, lane_id, lane_mask);
+        }
+      } else {
+#pragma unroll
+        for (unsigned i = 0; i < PAIRS_PER_THREAD; i++)
+          shfl_xor_bf(vals, i, lane_id, lane_mask);
+      }
+      lane_mask >>= 1;
+      exchg_region_offset <<= 1;
+    }
+
+    __syncwarp(); // maybe unnecessary but can't hurt
+
+    {
+      base_field tmp[VALS_PER_THREAD];
+      auto pair_addr = smem + 16 * warp_id + VALS_PER_WARP * (lane_id >> 3) + 2 * (threadIdx.x & 7);
+      if (ntt_idx > 0) {
+#pragma unroll
+        for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+          tmp[2 * i] = twiddle_cache[64 * i + lane_id];
+          tmp[2 * i + 1] = twiddle_cache[64 * i + lane_id + 32];
+        }
+
+        __syncthreads();
+
+#pragma unroll
+        for (unsigned i = 0; i < PAIRS_PER_THREAD; i++, pair_addr += 4 * VALS_PER_WARP) {
+          uint4* pair = reinterpret_cast<uint4*>(pair_addr);
+          const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
+          *pair = out;
+        }
+      } else {
+#pragma unroll
+        for (unsigned i = 0; i < PAIRS_PER_THREAD; i++, pair_addr += 4 * VALS_PER_WARP) {
+          uint4* pair = reinterpret_cast<uint4*>(pair_addr);
+          const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
+          *pair = out;
+        }
+      }
+
+      __syncthreads();
+
+      if (ntt_idx > 0) {
+#pragma unroll
+        for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+          vals[2 * i] = twiddle_cache[64 * i + lane_id];
+          vals[2 * i + 1] = twiddle_cache[64 * i + lane_id + 32];
+          twiddle_cache[64 * i + lane_id] = tmp[2 * i];
+          twiddle_cache[64 * i + lane_id + 32] = tmp[2 * i + 1];
+        }
+
+        __syncwarp();
+      } else {
+#pragma unroll
+        for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+          vals[2 * i] = twiddle_cache[64 * i + lane_id];
+          vals[2 * i + 1] = twiddle_cache[64 * i + lane_id + 32];
+        }
+
+         __syncwarp();
+
+        load_initial_twiddles_warp<VALS_PER_WARP, LOG_VALS_PER_THREAD>(twiddle_cache, lane_id, gmem_offset, inverse);
       }
     }
-    memory::store_cs(gmem_output + g, val);
+
+    base_field *twiddles_this_stage = twiddle_cache + VALS_PER_WARP - 2;
+    unsigned num_twiddles_this_stage = 1;
+    for (unsigned i = 0; i < LOG_VALS_PER_THREAD - 1; i++) {
+#pragma unroll
+      for (unsigned j = 0; j < (1 << i); j++) {
+        const unsigned exchg_tile_sz = VALS_PER_THREAD >> i;
+        const unsigned half_exchg_tile_sz = exchg_tile_sz >> 1;
+        const auto twiddle = twiddles_this_stage[j];
+#pragma unroll
+        for (unsigned k = 0; k < half_exchg_tile_sz; k++) {
+          exchg_dit(vals[exchg_tile_sz * j + k], vals[exchg_tile_sz * j + k + half_exchg_tile_sz], twiddle);
+        }
+      }
+      num_twiddles_this_stage <<= 1;
+      twiddles_this_stage -= num_twiddles_this_stage;
+    }
+
+    lane_mask = 16;
+    for (unsigned stage = 0, s = 5; stage < 6; stage++, s--) {
+#pragma unroll
+      for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+        const auto twiddle = twiddles_this_stage[(32 * i + lane_id) >> s];
+        exchg_dit(vals[2 * i], vals[2 * i + 1], twiddle);
+        if (stage < 5)
+          shfl_xor_bf(vals, i, lane_id, lane_mask);
+      }
+      lane_mask >>= 1;
+      num_twiddles_this_stage <<= 1;
+      twiddles_this_stage -= num_twiddles_this_stage;
+    }
+
+    if (inverse) {
+#pragma unroll
+      for (unsigned i = 0; i < VALS_PER_THREAD; i++)
+        vals[i] = base_field::mul(vals[i], inv_sizes[log_n]);
+//       if (log_extension_degree) {
+//         if (coset_idx) {
+//           const unsigned shift = OMEGA_LOG_ORDER - log_n - log_extension_degree;
+//           const unsigned offset = coset_idx << shift;
+// #pragma unroll
+//           for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
+//             const unsigned idx = __brev(gmem_offset + 64 * (i >> 1) + 2 * lane_id + (i & 1)) >> (32 - log_n);
+//             auto power_of_w = get_power_of_w(idx * offset, true);
+//             vals[i] = base_field::mul(vals[i], power_of_w);
+//           }
+//         }
+// #pragma unroll
+//         for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
+//           const unsigned idx = __brev(gmem_offset + 64 * (i >> 1) + 2 * lane_id + (i & 1)) >> (32 - log_n);
+//           auto power_of_g = get_power_of_g(idx, true);
+//           vals[i] = base_field::mul(vals[i], power_of_g);
+//         }
+//       }
+    }
+
+#pragma unroll
+    for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+      const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
+      memory::store_cs(reinterpret_cast<uint4*>(gmem_out + 64 * i + 2 * lane_id), out);
+    }
   }
 }
 
 extern "C" __launch_bounds__(512, 2) __global__
-    void n2b_final_9_to_12_stages(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
-                                  const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
-                                  const unsigned log_n, const bool inverse, const unsigned blocks_per_ntt, const unsigned log_extension_degree,
-                                  const unsigned coset_idx) {
-  extern __shared__ base_field smem[]; // 4096 elems
-
-  const unsigned tile_stride{16};
-  const unsigned lane_in_tile = threadIdx.x & 15;
-  const unsigned lane_id{threadIdx.x & 31};
-  const unsigned warp_id{threadIdx.x >> 5};
-  const unsigned ntt_idx = blockIdx.x / blocks_per_ntt;
-  const unsigned block_idx_in_ntt = blockIdx.x - ntt_idx * blocks_per_ntt;
-  const base_field *gmem_input = gmem_inputs_matrix + ntt_idx * stride_between_input_arrays + 4096 * block_idx_in_ntt;
-  base_field *gmem_output = gmem_outputs_matrix + ntt_idx * stride_between_output_arrays + 4096 * block_idx_in_ntt;
-
-  base_field reg_vals[8];
-  base_field *warp_scratch = smem + PADDED_WARP_SCRATCH_SIZE * warp_id;
-
-  // This kernel can handle up to 11 stages if needed by the overall NTT.
-  const unsigned extra_stages = stages_this_launch - 8;
-  switch (extra_stages) {
-  case 1:
-    ONE_EXTRA_STAGE_N2B
-    break;
-  case 2:
-    TWO_EXTRA_STAGES_N2B
-    break;
-  case 3:
-    THREE_OR_FOUR_EXTRA_STAGES_N2B(true)
-    break;
-  case 4:
-    THREE_OR_FOUR_EXTRA_STAGES_N2B(false)
-    break;
-  }
-
-  __syncthreads();
-
-  unsigned warp_exchg_region = block_idx_in_ntt * 16 + warp_id;
-  unsigned thread_exchg_region = warp_exchg_region;
-  for (int j = 0; j < 64; j += 32) {
-    for (int i = 0; i < 4; i++)
-      reg_vals[i] = warp_scratch[PAD(lane_id + 64 * i + j)];
-    TWO_REGISTER_STAGES_N2B(false)
-    for (int i = 0; i < 4; i++)
-      warp_scratch[PAD(lane_id + 64 * i + j)] = reg_vals[i];
-  }
-  warp_exchg_region *= 4;
-
-  __syncwarp();
-
-  thread_exchg_region = warp_exchg_region + (lane_id >> 3);
-  const unsigned vals_start = 64 * (lane_id >> 3) + (lane_id & 7);
-  for (int i = 0; i < 8; i++)
-    reg_vals[i] = warp_scratch[PAD(vals_start + 8 * i)];
-  THREE_REGISTER_STAGES_N2B(false)
-  for (int i = 0; i < 8; i++)
-    warp_scratch[PAD(vals_start + 8 * i)] = reg_vals[i];
-  warp_exchg_region *= 8;
-
-  __syncwarp();
-
-  thread_exchg_region = warp_exchg_region + lane_id;
-  for (int i = 0; i < 8; i++)
-    reg_vals[i] = warp_scratch[PAD(lane_id * 8 + i)];
-  THREE_REGISTER_STAGES_N2B(false)
-  for (int i = 0; i < 8; i++)
-    warp_scratch[PAD(lane_id * 8 + i)] = reg_vals[i];
-
-  __syncwarp();
-
-// unroll 2 and unroll 4 give comparable perf. Stores don't incur a stall so it's not as important to ILP them.
-#pragma unroll 1
-  for (unsigned i = 0, t = warp_id * 256 + lane_id; i < 8; i++, t += 32) {
-    const unsigned tile = t >> 4;
-    const unsigned s = (t >> 8) * PADDED_WARP_SCRATCH_SIZE + PAD(t & 255);
-    auto val = smem[s];
-    const unsigned g = tile * tile_stride + lane_in_tile;
-    if (inverse) {
-      val = base_field::mul(val, inv_sizes[log_n]);
-      if (log_extension_degree) {
-        const unsigned idx = __brev(g + 4096 * block_idx_in_ntt) >> (32 - log_n);
-        if (coset_idx) {
-          const unsigned shift = OMEGA_LOG_ORDER - log_n - log_extension_degree;
-          const unsigned offset = coset_idx << shift;
-          auto power_of_w = get_power_of_w(idx * offset, true);
-          val = base_field::mul(val, power_of_w);
-        }
-        auto power_of_g = get_power_of_g(idx, true);
-        val = base_field::mul(val, power_of_g);
-      }
-    }
-    memory::store_cs(gmem_output + g, val);
-  }
-}
-
-extern "C" __launch_bounds__(512, 2) __global__
-    void n2b_nonfinal_7_or_8_stages(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+void n2b_final_9_to_12_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
                                     const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
-                                    const unsigned log_n, const bool inverse, const unsigned blocks_per_ntt, const unsigned log_extension_degree,
+                                    const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
                                     const unsigned coset_idx) {
-  extern __shared__ base_field smem[]; // 4096 elems
+  n2b_final_stages_block<3>(gmem_inputs_matrix, gmem_outputs_matrix, stride_between_input_arrays, stride_between_output_arrays, start_stage,
+                            stages_this_launch, log_n, inverse, num_ntts, log_extension_degree, coset_idx);
+}
 
-  const unsigned log_stride{log_n - start_stage - 1};
-  const unsigned tile_stride{1u << (log_stride - 7)};
-  const unsigned lane_in_tile = threadIdx.x & 15;
+// This kernel basically reverses the pattern of the b2n_noninitial_stages_block kernel.
+template <unsigned LOG_VALS_PER_THREAD> DEVICE_FORCEINLINE
+void n2b_nonfinal_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                            const unsigned stride_between_output_arrays, const unsigned start_stage, const bool skip_last_stage,
+                            const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
+                            const unsigned coset_idx) {
+  constexpr unsigned VALS_PER_THREAD = 1 << LOG_VALS_PER_THREAD;
+  constexpr unsigned PAIRS_PER_THREAD = VALS_PER_THREAD >> 1;
+  constexpr unsigned VALS_PER_WARP = 32 * VALS_PER_THREAD;
+  constexpr unsigned TILES_PER_WARP = VALS_PER_WARP >> 4;
+  constexpr unsigned WARPS_PER_BLOCK = VALS_PER_WARP >> 4;
+  constexpr unsigned VALS_PER_BLOCK = VALS_PER_WARP * WARPS_PER_BLOCK;
+  constexpr unsigned TILES_PER_BLOCK = VALS_PER_BLOCK >> 4;
+  constexpr unsigned EXCHG_REGIONS_PER_BLOCK = TILES_PER_BLOCK >> 1;
+  constexpr unsigned MAX_STAGES_THIS_LAUNCH = 2 * (LOG_VALS_PER_THREAD + 5) - 8;
+
+  __shared__ base_field smem[VALS_PER_BLOCK];
+
   const unsigned lane_id{threadIdx.x & 31};
   const unsigned warp_id{threadIdx.x >> 5};
-  const unsigned exchg_region_sz{1u << (log_stride + 1)};
-  const unsigned log_blocks_per_region = log_stride - 11; // tile_stride / 16
-  const unsigned ntt_idx = blockIdx.x / blocks_per_ntt;
-  const unsigned block_idx_in_ntt = blockIdx.x - ntt_idx * blocks_per_ntt;
-  unsigned block_exchg_region = block_idx_in_ntt >> log_blocks_per_region;
-  const unsigned block_exchg_region_start = block_exchg_region * exchg_region_sz;
-  const unsigned block_start_in_exchg_region = 16 * (block_idx_in_ntt & ((1 << log_blocks_per_region) - 1));
-  const base_field *gmem_input = gmem_inputs_matrix + ntt_idx * stride_between_input_arrays + block_exchg_region_start + block_start_in_exchg_region;
-  base_field *gmem_output = gmem_outputs_matrix + ntt_idx * stride_between_output_arrays + block_exchg_region_start + block_start_in_exchg_region;
+  const unsigned log_tile_stride = log_n - start_stage - MAX_STAGES_THIS_LAUNCH;
+  const unsigned tile_stride = 1 << log_tile_stride;
+  const unsigned log_blocks_per_region = log_tile_stride - 4; // tile size is always 16
+  const unsigned block_bfly_region_size = TILES_PER_BLOCK * tile_stride;
+  const unsigned block_bfly_region = blockIdx.x >> log_blocks_per_region;
+  const unsigned block_bfly_region_start = block_bfly_region * block_bfly_region_size;
+  const unsigned block_start_in_bfly_region = 16 * (blockIdx.x & ((1 << log_blocks_per_region) - 1));
+  // annoyingly scrambled, but should be coalesced overall
+  const unsigned gmem_in_thread_offset = tile_stride * warp_id + tile_stride * WARPS_PER_BLOCK * (lane_id >> 4)
+                                       + 2 * (lane_id & 7) + ((lane_id >> 3) & 1);
+  const unsigned gmem_in_offset = block_bfly_region_start + block_start_in_bfly_region + gmem_in_thread_offset;
+  const base_field *gmem_in = gmem_inputs_matrix + gmem_in_offset + NTTS_PER_BLOCK * stride_between_input_arrays * blockIdx.y;
+  base_field *gmem_out = gmem_outputs_matrix + block_bfly_region_start + block_start_in_bfly_region +
+                         NTTS_PER_BLOCK * stride_between_output_arrays * blockIdx.y;
 
-  {
-    // maybe some memcpy_asyncs could further micro-optimize this
-    // maybe an arrive-wait barrier could further micro-optimize the start_stage > 0 case
-    base_field reg_vals[8];
-#pragma unroll 8
-    for (unsigned i = 0, t = warp_id * 256 + lane_id; i < 8; i++, t += 32) {
-      const unsigned tile = t >> 4;
-      const unsigned g = tile * tile_stride + lane_in_tile;
-      reg_vals[i] = memory::load_cs(gmem_input + g);
+  auto twiddle_cache = smem + VALS_PER_WARP * warp_id;
+
+  base_field vals[VALS_PER_THREAD];
+
+  const unsigned bound = std::min(NTTS_PER_BLOCK, num_ntts - NTTS_PER_BLOCK * blockIdx.y);
+  for (unsigned ntt_idx = 0; ntt_idx < bound;
+       ntt_idx++, gmem_in += stride_between_input_arrays, gmem_out += stride_between_output_arrays) {
+#pragma unroll
+    for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+      vals[2 * i] = memory::load_cs(gmem_in + 4 * i * tile_stride * WARPS_PER_BLOCK);
+      vals[2 * i + 1] = memory::load_cs(gmem_in + (4 * i + 2) * tile_stride * WARPS_PER_BLOCK);
     }
-    if ((start_stage == 0) && log_extension_degree && !inverse) {
-      const unsigned shift = OMEGA_LOG_ORDER - log_n - log_extension_degree;
-      const unsigned offset = coset_idx << shift;
-#pragma unroll 8
-      for (unsigned i = 0, t = warp_id * 256 + lane_id; i < 8; i++, t += 32) {
-        const unsigned tile = t >> 4;
-        const unsigned idx = tile * tile_stride + lane_in_tile + block_exchg_region_start + block_start_in_exchg_region;
-        if (coset_idx) {
-          auto power_of_w = get_power_of_w(idx * offset, false);
-          reg_vals[i] = base_field::mul(reg_vals[i], power_of_w);
+
+//     if ((start_stage == 0) && log_extension_degree && !inverse) {
+//       if (coset_idx) {
+//         const unsigned shift = OMEGA_LOG_ORDER - log_n - log_extension_degree;
+//         const unsigned offset = coset_idx << shift;
+// #pragma unroll
+//         for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+//           const unsigned idx0 = gmem_in_offset + 4 * i * tile_stride * WARPS_PER_BLOCK;
+//           const unsigned idx1 = gmem_in_offset + (4 * i  + 2) * tile_stride * WARPS_PER_BLOCK;
+//           auto power_of_w0 = get_power_of_w(idx0 * offset, false);
+//           auto power_of_w1 = get_power_of_w(idx1 * offset, false);
+//           vals[2 * i] = base_field::mul(vals[2 * i], power_of_w0);
+//           vals[2 * i + 1] = base_field::mul(vals[2 * i + 1], power_of_w1);
+//         }
+//       }
+// #pragma unroll
+//       for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
+//         const unsigned idx0 = gmem_in_offset + 4 * i * tile_stride * WARPS_PER_BLOCK;
+//         const unsigned idx1 = gmem_in_offset + (4 * i  + 2) * tile_stride * WARPS_PER_BLOCK;
+//         auto power_of_g0 = get_power_of_g(idx0, false);
+//         auto power_of_g1 = get_power_of_g(idx1, false);
+//         vals[2 * i] = base_field::mul(vals[2 * i], power_of_g0);
+//         vals[2 * i + 1] = base_field::mul(vals[2 * i + 1], power_of_g1);
+//       }
+//     }
+
+    unsigned block_exchg_region_offset = block_bfly_region;
+    for (unsigned i = 0; i < LOG_VALS_PER_THREAD - 1; i++) {
+#pragma unroll
+      for (unsigned j = 0; j < (1 << i); j++) {
+        const unsigned exchg_tile_sz = VALS_PER_THREAD >> i;
+        const unsigned half_exchg_tile_sz = exchg_tile_sz >> 1;
+        const auto twiddle = get_twiddle(inverse, block_exchg_region_offset + j);
+#pragma unroll
+        for (unsigned k = 0; k < half_exchg_tile_sz; k++)
+          exchg_dit(vals[exchg_tile_sz * j + k], vals[exchg_tile_sz * j + k + half_exchg_tile_sz], twiddle);
+      }
+      block_exchg_region_offset <<= 1;
+    }
+
+    unsigned lane_mask = 16;
+    unsigned halfwarp_id = lane_id >> 4;
+    for (unsigned s = 0; s < 2; s++) {
+#pragma unroll
+      for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+        // TODO: Handle these cooperatively?
+        const auto twiddle = get_twiddle(inverse, block_exchg_region_offset + ((2 * i + halfwarp_id) >> (1 - s)));
+        exchg_dit(vals[2 * i], vals[2 * i + 1], twiddle);
+        shfl_xor_bf(vals, i, lane_id, lane_mask);
+      }
+      lane_mask >>= 1;
+      block_exchg_region_offset <<= 1;
+    }
+
+    __syncwarp(); // maybe unnecessary but can't hurt
+
+    // there are at most 31 per-warp twiddles, so we only need 1 temporary per thread to stash them
+    base_field tmp;
+    if (ntt_idx > 0) {
+      tmp = twiddle_cache[lane_id];
+      __syncthreads();
+    }
+
+    auto smem_pair_addr = smem + 16 * warp_id + VALS_PER_WARP * (lane_id >> 3) + 2 * (threadIdx.x & 7);
+#pragma unroll
+    for (unsigned i = 0; i < PAIRS_PER_THREAD; i++, smem_pair_addr += 4 * VALS_PER_WARP) {
+      uint4* pair = reinterpret_cast<uint4*>(smem_pair_addr);
+      const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
+      *pair = out;
+    }
+
+    __syncthreads();
+
+    // annoyingly scrambled but should be bank-conflict-free
+    const unsigned smem_thread_offset = 16 * (lane_id >> 4) + 2 * (lane_id & 7) + ((lane_id >> 3) & 1);
+#pragma unroll
+    for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+      vals[2 * i] = twiddle_cache[64 * i + smem_thread_offset];
+      vals[2 * i + 1] = twiddle_cache[64 * i + smem_thread_offset + 32];
+    }
+
+    __syncwarp();
+
+    if (ntt_idx > 0) {
+      twiddle_cache[lane_id] = tmp;
+      __syncwarp();
+    } else {
+      load_noninitial_twiddles_warp<LOG_VALS_PER_THREAD>(twiddle_cache, lane_id, warp_id,
+                                                         block_bfly_region * EXCHG_REGIONS_PER_BLOCK, inverse);
+    }
+
+    base_field *twiddles_this_stage = twiddle_cache + 2 * VALS_PER_THREAD - 2;
+    unsigned num_twiddles_this_stage = 1;
+    for (unsigned i = 0; i < LOG_VALS_PER_THREAD - 1; i++) {
+#pragma unroll
+      for (unsigned j = 0; j < (1 << i); j++) {
+        const unsigned exchg_tile_sz = VALS_PER_THREAD >> i;
+        const unsigned half_exchg_tile_sz = exchg_tile_sz >> 1;
+        const auto twiddle = twiddles_this_stage[j];
+#pragma unroll
+        for (unsigned k = 0; k < half_exchg_tile_sz; k++) {
+          exchg_dit(vals[exchg_tile_sz * j + k], vals[exchg_tile_sz * j + k + half_exchg_tile_sz], twiddle);
         }
-        auto power_of_g = get_power_of_g(idx, false);
-        reg_vals[i] = base_field::mul(reg_vals[i], power_of_g);
+      }
+      num_twiddles_this_stage <<= 1;
+      twiddles_this_stage -= num_twiddles_this_stage;
+    }
+
+    lane_mask = 16;
+    for (unsigned s = 0; s < 2; s++) {
+      if (!skip_last_stage || s < 1) {
+#pragma unroll
+        for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+          // TODO: Handle these cooperatively?
+          const auto twiddle = twiddles_this_stage[(2 * i + halfwarp_id) >> (1 - s)];
+          exchg_dit(vals[2 * i], vals[2 * i + 1], twiddle);
+          shfl_xor_bf(vals, i, lane_id, lane_mask);
+        }
+        lane_mask >>= 1;
+        num_twiddles_this_stage <<= 1;
+        twiddles_this_stage -= num_twiddles_this_stage;
       }
     }
-#pragma unroll 8
-    for (unsigned i = 0, t = warp_id * 256 + lane_id; i < 8; i++, t += 32) {
-      // puts each warp's data in its assigned smem region
-      const unsigned tile = t >> 4;
-      const unsigned s = lane_in_tile * PADDED_WARP_SCRATCH_SIZE + PAD(tile);
-      memory::store(smem + s, reg_vals[i]);
+
+    if (skip_last_stage) {
+      auto val0_addr = gmem_out + TILES_PER_WARP * tile_stride * warp_id + 2 * tile_stride * (lane_id >> 4) + 2 * (threadIdx.x & 7) + (lane_id >> 3 & 1);
+#pragma unroll
+      for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+        memory::store_cs(val0_addr, vals[2 * i]);
+        memory::store_cs(val0_addr + tile_stride, vals[2 * i + 1]);
+        val0_addr += 4 * tile_stride;
+      }
+    } else {
+      auto pair_addr = gmem_out + TILES_PER_WARP * tile_stride * warp_id + tile_stride * (lane_id >> 3) + 2 * (threadIdx.x & 7);
+#pragma unroll
+      for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+        const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
+        memory::store_cs(reinterpret_cast<uint4*>(pair_addr), out);
+        pair_addr += 4 * tile_stride;
+      }
     }
   }
+}
 
-  __syncthreads();
-
-  base_field reg_vals[8];
-  base_field *warp_scratch = smem + PADDED_WARP_SCRATCH_SIZE * warp_id;
-
-  unsigned thread_exchg_region = block_exchg_region;
-  for (int j = 0; j < 64; j += 32) {
-    for (int i = 0; i < 4; i++)
-      reg_vals[i] = warp_scratch[PAD(lane_id + 64 * i + j)];
-    TWO_REGISTER_STAGES_N2B(false)
-    for (int i = 0; i < 4; i++)
-      warp_scratch[PAD(lane_id + 64 * i + j)] = reg_vals[i];
-  }
-  block_exchg_region *= 4;
-
-  __syncwarp();
-
-  thread_exchg_region = block_exchg_region + (lane_id >> 3);
-  const unsigned vals_start = 64 * (lane_id >> 3) + (lane_id & 7);
-  for (int i = 0; i < 8; i++)
-    reg_vals[i] = warp_scratch[PAD(vals_start + 8 * i)];
-  THREE_REGISTER_STAGES_N2B(false)
-  for (int i = 0; i < 8; i++)
-    warp_scratch[PAD(vals_start + 8 * i)] = reg_vals[i];
-  block_exchg_region *= 8;
-
-  __syncwarp();
-
-  thread_exchg_region = block_exchg_region + lane_id;
-  for (int i = 0; i < 8; i++)
-    reg_vals[i] = warp_scratch[PAD(lane_id * 8 + i)];
-  THREE_REGISTER_STAGES_N2B((stages_this_launch == 7))
-  for (int i = 0; i < 8; i++)
-    warp_scratch[PAD(lane_id * 8 + i)] = reg_vals[i];
-
-  __syncthreads();
-
-// unroll 2 and unroll 4 give comparable perf. Stores don't incur a stall so it's not as important to ILP them.
-#pragma unroll 1
-  for (unsigned i = 0, t = warp_id * 256 + lane_id; i < 8; i++, t += 32) {
-    const unsigned tile = t >> 4;
-    const unsigned s = lane_in_tile * PADDED_WARP_SCRATCH_SIZE + PAD(tile);
-    const auto val = smem[s];
-    const unsigned g = tile * tile_stride + lane_in_tile;
-    memory::store_cs(gmem_output + g, val);
-  }
+extern "C" __launch_bounds__(512, 2) __global__
+void n2b_nonfinal_7_or_8_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                                      const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                                      const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
+                                      const unsigned coset_idx) {
+  n2b_nonfinal_stages_block<3>(gmem_inputs_matrix, gmem_outputs_matrix, stride_between_input_arrays, stride_between_output_arrays, start_stage,
+                               stages_this_launch == 7, log_n, inverse, num_ntts, log_extension_degree, coset_idx);
 }
 
 // Simple, non-optimized kernel used for log_n < 16, to unblock debugging small proofs.
