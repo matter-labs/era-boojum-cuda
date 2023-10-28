@@ -422,24 +422,22 @@ pub fn gather_merkle_paths(
     indexes: &DeviceSlice<u32>,
     values: &DeviceSlice<GoldilocksField>,
     results: &mut DeviceSlice<GoldilocksField>,
+    layers_count: u32,
     stream: &CudaStream,
 ) -> CudaResult<()> {
+    assert!(indexes.len() <= u32::MAX as usize);
+    let indexes_count = indexes.len() as u32;
     assert_eq!(values.len() % CAPACITY, 0);
     let values_count = values.len() / CAPACITY;
     assert!(values_count.is_power_of_two());
     let log_values_count = values_count.trailing_zeros();
     assert_ne!(log_values_count, 0);
     let log_leaves_count = log_values_count - 1;
-    assert_eq!(results.len() % CAPACITY, 0);
-    let results_count = results.len() / CAPACITY;
-    let indexes_len = indexes.len();
-    assert_eq!(results_count % indexes_len, 0);
-    let layers_count = results_count / indexes_len;
-    assert!(layers_count < log_leaves_count as usize);
-    let layers_count = layers_count as u32;
-    assert_eq!(WARP_SIZE % CAPACITY as u32, 0);
-    assert!(indexes_len <= u32::MAX as usize);
-    let indexes_count = indexes_len as u32;
+    assert!(layers_count < log_leaves_count);
+    assert_eq!(
+        indexes.len() * layers_count as usize * CAPACITY,
+        results.len()
+    );
     let (grid_dim, block_dim) = get_grid_block_dims_for_threads_count(WARP_SIZE, indexes_count);
     let grid_dim = (grid_dim.x, CAPACITY as u32, layers_count).into();
     let indexes = indexes.as_ptr();
@@ -960,6 +958,7 @@ mod tests {
             &indexes_device,
             &values_device,
             &mut results_device,
+            LAYERS_COUNT as u32,
             &stream,
         )
         .unwrap();
