@@ -844,10 +844,10 @@ mod tests {
         h_in.into_iter()
             .chunks(NUM_ITEMS)
             .into_iter()
-            .zip(h_out.into_iter().chunks(NUM_ITEMS).into_iter())
+            .zip(h_out.chunks(NUM_ITEMS))
             .for_each(|(h_in, h_out)| {
                 let h_in = h_in.collect_vec();
-                let h_out = h_out.collect_vec();
+                let h_out = Vec::from(h_out);
                 verify(operation, inclusive, reverse, h_in, h_out);
             });
     }

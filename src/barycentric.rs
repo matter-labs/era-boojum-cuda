@@ -91,6 +91,7 @@ pub trait PrecomputeImpl {
         GoldilocksField,
         u32,
     );
+    #[allow(clippy::type_complexity)]
     fn get_precompute_kernel() -> unsafe extern "C" fn(
         *const <Self::X as DeviceRepr>::Type,
         *const <Self::X as DeviceRepr>::Type,
@@ -181,6 +182,7 @@ pub trait EvalImpl {
     type XVec: DeviceRepr;
     type YsVec: DeviceRepr;
     fn get_partial_reduce_elems_per_thread() -> u32;
+    #[allow(clippy::type_complexity)]
     fn get_partial_reduce_kernel() -> unsafe extern "C" fn(
         PtrAndStride<<Self::YsVec as DeviceRepr>::Type>,
         PtrAndStride<<Self::XVec as DeviceRepr>::Type>,

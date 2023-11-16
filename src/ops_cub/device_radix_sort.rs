@@ -591,14 +591,8 @@ mod tests {
         memory_copy_async(&mut h_keys_out, &d_keys_out, &stream).unwrap();
         memory_copy_async(&mut h_values_out, &d_values_out, &stream).unwrap();
         stream.synchronize().unwrap();
-        let mut pairs_in = h_keys_in
-            .into_iter()
-            .zip(h_values_in.into_iter())
-            .collect_vec();
-        let pairs_out = h_keys_out
-            .into_iter()
-            .zip(h_values_out.into_iter())
-            .collect_vec();
+        let mut pairs_in = h_keys_in.into_iter().zip(h_values_in).collect_vec();
+        let pairs_out = h_keys_out.into_iter().zip(h_values_out).collect_vec();
         pairs_in.sort_by_key(|(k, _)| k.clone());
         if descending {
             pairs_in.reverse()
