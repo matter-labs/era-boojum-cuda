@@ -138,15 +138,15 @@ DEVICE_FORCEINLINE void poseidon2_internal_matrix(const base_field *variables, c
 #define GATE_POSEIDON(variables_offset, witnesses_offset)                                                                                                      \
   {                                                                                                                                                            \
     poseidon_repetition<witnesses_offset>(variables, witnesses, challenge_bases, challenge_powers, quotient_sums, challenges_count, inputs_stride);            \
-    variables += (variables_offset)*inputs_stride;                                                                                                             \
-    witnesses += (witnesses_offset)*inputs_stride;                                                                                                             \
+    variables += (variables_offset) * inputs_stride;                                                                                                           \
+    witnesses += (witnesses_offset) * inputs_stride;                                                                                                           \
   }
 
 #define GATE_POSEIDON2(variables_offset, witnesses_offset)                                                                                                     \
   {                                                                                                                                                            \
     poseidon2_repetition<witnesses_offset>(variables, witnesses, challenge_bases, challenge_powers, quotient_sums, challenges_count, inputs_stride);           \
-    variables += (variables_offset)*inputs_stride;                                                                                                             \
-    witnesses += (witnesses_offset)*inputs_stride;                                                                                                             \
+    variables += (variables_offset) * inputs_stride;                                                                                                           \
+    witnesses += (witnesses_offset) * inputs_stride;                                                                                                           \
   }
 
 #define GATE_POSEIDON2_EXTERNAL_MATRIX                                                                                                                         \

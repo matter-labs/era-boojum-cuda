@@ -1,5 +1,6 @@
+use cudart::cuda_kernel;
 use cudart::device::{device_get_attribute, get_device};
-use cudart::execution::{KernelFourArgs, KernelLaunch};
+use cudart::execution::{CudaLaunchConfig, KernelFunction};
 use cudart::memory::memory_set_async;
 use cudart::occupancy::max_active_blocks_per_multiprocessor;
 use cudart::result::CudaResult;
@@ -9,9 +10,7 @@ use cudart_sys::CudaDeviceAttr;
 
 use crate::utils::WARP_SIZE;
 
-extern "C" {
-    fn blake2s_pow_kernel(seed: *const u8, bits_count: u32, max_nonce: u64, result: *mut u64);
-}
+cuda_kernel!(Blake2SPow, blake2s_pow_kernel(seed: *const u8, bits_count: u32, max_nonce: u64, result: *mut u64));
 
 pub fn blake2s_pow(
     seed: &DeviceSlice<u8>,
@@ -20,32 +19,26 @@ pub fn blake2s_pow(
     result: &mut DeviceVariable<u64>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
-    const BLOCK_SIZE: u32 = WARP_SIZE * 4;
     assert_eq!(seed.len(), 32);
     unsafe {
         memory_set_async(result.transmute_mut(), 0xff, stream)?;
-    } // set result to 0 (false
-    let seed = seed.as_ptr();
-    let result = result.as_mut_ptr();
-    let args = (&seed, &bits_count, &max_nonce, &result);
+    }
+    const BLOCK_SIZE: u32 = WARP_SIZE * 4;
     let device_id = get_device()?;
     let mpc = device_get_attribute(CudaDeviceAttr::MultiProcessorCount, device_id).unwrap();
-    let max_blocks = max_active_blocks_per_multiprocessor(
-        blake2s_pow_kernel as KernelFourArgs<_, _, _, _>,
-        BLOCK_SIZE as i32,
-        0,
-    )?;
+    let kernel_function = Blake2SPowFunction::default();
+    let max_blocks = max_active_blocks_per_multiprocessor(&kernel_function, BLOCK_SIZE as i32, 0)?;
     let num_blocks = (mpc * max_blocks) as u32;
-    unsafe {
-        KernelFourArgs::launch(
-            blake2s_pow_kernel,
-            num_blocks.into(),
-            BLOCK_SIZE.into(),
-            args,
-            0,
-            stream,
-        )
-    }
+    let config = CudaLaunchConfig::basic(num_blocks, BLOCK_SIZE, stream);
+    let seed = seed.as_ptr();
+    let result = result.as_mut_ptr();
+    let args = Blake2SPowArguments {
+        seed,
+        bits_count,
+        max_nonce,
+        result,
+    };
+    kernel_function.launch(&config, &args)
 }
 
 #[cfg(test)]

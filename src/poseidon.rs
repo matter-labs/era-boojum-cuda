@@ -1,180 +1,134 @@
-use boojum::field::goldilocks::GoldilocksField;
-use boojum::implementations::poseidon_goldilocks_params::*;
-
-use cudart::execution::{
-    KernelFiveArgs, KernelFourArgs, KernelLaunch, KernelSevenArgs, KernelThreeArgs,
-};
-use cudart::result::CudaResult;
-use cudart::slice::DeviceSlice;
-use cudart::stream::CudaStream;
-use cudart_sys::dim3;
-
 use crate::device_structures::{
-    BaseFieldDeviceType, DeviceMatrixChunkImpl, DeviceMatrixChunkMutImpl, MutPtrAndStride,
-    PtrAndStride,
+    DeviceMatrixChunkImpl, DeviceMatrixChunkMutImpl, DeviceRepr, MutPtrAndStride, PtrAndStride,
 };
 use crate::utils::{get_grid_block_dims_for_threads_count, WARP_SIZE};
 use crate::BaseField;
+use boojum::field::goldilocks::GoldilocksField;
+use boojum::implementations::poseidon_goldilocks_params::*;
+use cudart::cuda_kernel;
+use cudart::execution::{CudaLaunchConfig, Dim3, KernelFunction};
+use cudart::result::CudaResult;
+use cudart::slice::DeviceSlice;
+use cudart::stream::CudaStream;
 
-extern "C" {
-    fn poseidon_single_thread_leaves_kernel(
-        values: *const GoldilocksField,
-        results: *mut GoldilocksField,
-        rows_count: u32,
-        cols_count: u32,
-        count: u32,
-        load_intermediate: bool,
-        store_intermediate: bool,
-    );
+type BF = BaseField;
 
-    fn poseidon_single_thread_nodes_kernel(
-        values: *const GoldilocksField,
-        results: *mut GoldilocksField,
-        count: u32,
-    );
+cuda_kernel!(
+    Leaves,
+    leaves_kernel,
+    values: *const BF,
+    results: *mut BF,
+    rows_count: u32,
+    cols_count: u32,
+    count: u32,
+    load_intermediate: bool,
+    store_intermediate: bool,
+);
 
-    fn poseidon_cooperative_nodes_kernel(
-        values: *const GoldilocksField,
-        results: *mut GoldilocksField,
-        count: u32,
-    );
+leaves_kernel!(poseidon_single_thread_leaves_kernel);
+leaves_kernel!(poseidon2_single_thread_leaves_kernel);
+leaves_kernel!(poseidon2_cooperative_leaves_kernel);
 
-    fn poseidon2_single_thread_leaves_kernel(
-        values: *const GoldilocksField,
-        results: *mut GoldilocksField,
-        rows_count: u32,
-        cols_count: u32,
-        count: u32,
-        load_intermediate: bool,
-        store_intermediate: bool,
-    );
+cuda_kernel!(
+    Nodes,
+    nodes_kernel,
+    values: *const BF,
+    results: *mut BF,
+    count: u32,
+);
 
-    fn poseidon2_single_thread_nodes_kernel(
-        values: *const GoldilocksField,
-        results: *mut GoldilocksField,
-        count: u32,
-    );
+nodes_kernel!(poseidon_single_thread_nodes_kernel);
+nodes_kernel!(poseidon_cooperative_nodes_kernel);
+nodes_kernel!(poseidon2_single_thread_nodes_kernel);
+nodes_kernel!(poseidon2_cooperative_nodes_kernel);
 
-    fn poseidon2_cooperative_leaves_kernel(
-        values: *const GoldilocksField,
-        results: *mut GoldilocksField,
-        rows_count: u32,
-        cols_count: u32,
-        count: u32,
-        load_intermediate: bool,
-        store_intermediate: bool,
-    );
-
-    fn poseidon2_cooperative_nodes_kernel(
-        values: *const GoldilocksField,
-        results: *mut GoldilocksField,
-        count: u32,
-    );
-
-    fn gather_rows_kernel(
+cuda_kernel!(
+    GatherRows,
+    gather_rows_kernel(
         indexes: *const u32,
         indexes_count: u32,
-        values: PtrAndStride<BaseFieldDeviceType>,
-        results: MutPtrAndStride<BaseFieldDeviceType>,
-    );
+        values: PtrAndStride<<BF as DeviceRepr>::Type>,
+        results: MutPtrAndStride<<BF as DeviceRepr>::Type>,
+    )
+);
 
-    fn gather_merkle_paths_kernel(
+cuda_kernel!(
+    GatherMerklePaths,
+    gather_merkle_paths_kernel(
         indexes: *const u32,
         indexes_count: u32,
-        values: *const GoldilocksField,
+        values: *const BF,
         log_leaves_count: u32,
-        results: *mut GoldilocksField,
-    );
-}
-
-type LeavesFn =
-    unsafe extern "C" fn(*const GoldilocksField, *mut GoldilocksField, u32, u32, u32, bool, bool);
-
-type NodesFn = unsafe extern "C" fn(*const GoldilocksField, *mut GoldilocksField, u32);
+        results: *mut BF,
+    )
+);
 
 pub struct Poseidon {}
 
 pub struct Poseidon2 {}
 
-pub trait PoseidonRunnable {
-    fn nodes_prefer_single_thread_threshold() -> u32 {
-        14
-    }
-    fn get_grid_block_leaves_single_thread(count: u32) -> (dim3, dim3) {
+pub trait PoseidonImpl {
+    const NODES_PREFER_SINGLE_THREAD_THRESHOLD: u32 = 14;
+
+    fn get_grid_block_leaves_single_thread(count: u32) -> (Dim3, Dim3) {
         get_grid_block_dims_for_threads_count(WARP_SIZE * 2, count)
     }
-    fn get_grid_block_nodes_single_thread(count: u32) -> (dim3, dim3) {
+    fn get_grid_block_nodes_single_thread(count: u32) -> (Dim3, Dim3) {
         get_grid_block_dims_for_threads_count(WARP_SIZE * 2, count)
     }
     fn unique_asserts();
-    fn get_grid_block_leaves_cooperative(count: u32) -> (dim3, dim3);
-    fn get_grid_block_nodes_cooperative(count: u32) -> (dim3, dim3);
-    fn get_kernel_leaves_single_thread() -> LeavesFn;
-    fn get_kernel_leaves_cooperative() -> LeavesFn;
-    fn get_kernel_nodes_single_thread() -> NodesFn;
-    fn get_kernel_nodes_cooperative() -> NodesFn;
+    fn get_grid_block_leaves_cooperative(count: u32) -> (Dim3, Dim3);
+    fn get_grid_block_nodes_cooperative(count: u32) -> (Dim3, Dim3);
+    const LEAVES_SINGLE_THREAD_FUNCTION: LeavesSignature;
+    const LEAVES_COOPERATIVE_FUNCTION: LeavesSignature;
+    const NODES_SINGLE_THREAD_FUNCTION: NodesSignature;
+    const NODES_COOPERATIVE_FUNCTION: NodesSignature;
 }
 
-impl PoseidonRunnable for Poseidon {
+impl PoseidonImpl for Poseidon {
     fn unique_asserts() {}
     #[allow(unused_variables)]
-    fn get_grid_block_leaves_cooperative(count: u32) -> (dim3, dim3) {
+    fn get_grid_block_leaves_cooperative(count: u32) -> (Dim3, Dim3) {
         unimplemented!("leaves_cooperative not implemented for Poseidon");
     }
-    fn get_grid_block_nodes_cooperative(count: u32) -> (dim3, dim3) {
+    fn get_grid_block_nodes_cooperative(count: u32) -> (Dim3, Dim3) {
         let (grid_dim, mut block_dim) = get_grid_block_dims_for_threads_count(WARP_SIZE, count);
         block_dim.y = 4;
         (grid_dim, block_dim)
     }
-    fn get_kernel_leaves_single_thread() -> LeavesFn {
-        poseidon_single_thread_leaves_kernel
-    }
-    fn get_kernel_leaves_cooperative() -> LeavesFn {
-        unimplemented!("leaves_cooperative not implemented for Poseidon");
-    }
-    fn get_kernel_nodes_single_thread() -> NodesFn {
-        poseidon_single_thread_nodes_kernel
-    }
-    fn get_kernel_nodes_cooperative() -> NodesFn {
-        poseidon_cooperative_nodes_kernel
-    }
+    const LEAVES_SINGLE_THREAD_FUNCTION: LeavesSignature = poseidon_single_thread_leaves_kernel;
+    const LEAVES_COOPERATIVE_FUNCTION: LeavesSignature = unimplemented!();
+    const NODES_SINGLE_THREAD_FUNCTION: NodesSignature = poseidon_single_thread_nodes_kernel;
+    const NODES_COOPERATIVE_FUNCTION: NodesSignature = poseidon_cooperative_nodes_kernel;
 }
 
-impl PoseidonRunnable for Poseidon2 {
+impl PoseidonImpl for Poseidon2 {
     fn unique_asserts() {
         // These sizes are what we need for now.
         // I can generalize the kernels if that changes.
         assert_eq!(RATE, 8);
         assert_eq!(CAPACITY, 4);
     }
-    fn get_grid_block_leaves_cooperative(count: u32) -> (dim3, dim3) {
+    fn get_grid_block_leaves_cooperative(count: u32) -> (Dim3, Dim3) {
         let (grid_dim, mut block_dim) = get_grid_block_dims_for_threads_count(WARP_SIZE, count);
         block_dim.y = 3;
         (grid_dim, block_dim)
     }
-    fn get_grid_block_nodes_cooperative(count: u32) -> (dim3, dim3) {
+    fn get_grid_block_nodes_cooperative(count: u32) -> (Dim3, Dim3) {
         let (grid_dim, mut block_dim) = get_grid_block_dims_for_threads_count(WARP_SIZE, count);
         block_dim.y = 3;
         (grid_dim, block_dim)
     }
-    fn get_kernel_leaves_single_thread() -> LeavesFn {
-        poseidon2_single_thread_leaves_kernel
-    }
-    fn get_kernel_leaves_cooperative() -> LeavesFn {
-        poseidon2_cooperative_leaves_kernel
-    }
-    fn get_kernel_nodes_single_thread() -> NodesFn {
-        poseidon2_single_thread_nodes_kernel
-    }
-    fn get_kernel_nodes_cooperative() -> NodesFn {
-        poseidon2_cooperative_nodes_kernel
-    }
+    const LEAVES_SINGLE_THREAD_FUNCTION: LeavesSignature = poseidon2_single_thread_leaves_kernel;
+    const LEAVES_COOPERATIVE_FUNCTION: LeavesSignature = poseidon2_cooperative_leaves_kernel;
+    const NODES_SINGLE_THREAD_FUNCTION: NodesSignature = poseidon2_single_thread_nodes_kernel;
+    const NODES_COOPERATIVE_FUNCTION: NodesSignature = poseidon2_cooperative_nodes_kernel;
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn launch_leaves_kernel<P: PoseidonRunnable>(
-    get_kernel_fn: fn() -> LeavesFn,
-    get_grid_block_fn: fn(u32) -> (dim3, dim3),
+pub fn launch_leaves_kernel<P: PoseidonImpl>(
+    kernel_function: LeavesSignature,
+    get_grid_block_fn: fn(u32) -> (Dim3, Dim3),
     values: &DeviceSlice<GoldilocksField>,
     results: &mut DeviceSlice<GoldilocksField>,
     log_rows_per_hash: u32,
@@ -201,21 +155,21 @@ pub fn launch_leaves_kernel<P: PoseidonRunnable>(
     // of columns we may include in the partial set.
     assert!(!store_intermediate || ((rows_count * cols_count) % RATE as u32 == 0));
     let count = count as u32;
-    let kernel = get_kernel_fn();
     let (grid_dim, block_dim) = get_grid_block_fn(count);
-    let args = (
-        &values,
-        &results,
-        &rows_count,
-        &cols_count,
-        &count,
-        &load_intermediate,
-        &store_intermediate,
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = LeavesArguments::new(
+        values,
+        results,
+        rows_count,
+        cols_count,
+        count,
+        load_intermediate,
+        store_intermediate,
     );
-    unsafe { KernelSevenArgs::launch(kernel, grid_dim, block_dim, args, 0, stream) }
+    LeavesFunction(kernel_function).launch(&config, &args)
 }
 
-pub fn launch_single_thread_leaves_kernel<P: PoseidonRunnable>(
+pub fn launch_single_thread_leaves_kernel<P: PoseidonImpl>(
     values: &DeviceSlice<GoldilocksField>,
     results: &mut DeviceSlice<GoldilocksField>,
     log_rows_per_hash: u32,
@@ -223,10 +177,10 @@ pub fn launch_single_thread_leaves_kernel<P: PoseidonRunnable>(
     store_intermediate: bool,
     stream: &CudaStream,
 ) -> CudaResult<()> {
-    let get_kernel_fn = P::get_kernel_leaves_single_thread;
+    let kernel_function = P::LEAVES_SINGLE_THREAD_FUNCTION;
     let get_grid_block_fn = P::get_grid_block_leaves_single_thread;
     launch_leaves_kernel::<P>(
-        get_kernel_fn,
+        kernel_function,
         get_grid_block_fn,
         values,
         results,
@@ -237,7 +191,7 @@ pub fn launch_single_thread_leaves_kernel<P: PoseidonRunnable>(
     )
 }
 
-pub fn launch_cooperative_leaves_kernel<P: PoseidonRunnable>(
+pub fn launch_cooperative_leaves_kernel<P: PoseidonImpl>(
     values: &DeviceSlice<GoldilocksField>,
     results: &mut DeviceSlice<GoldilocksField>,
     log_rows_per_hash: u32,
@@ -245,10 +199,10 @@ pub fn launch_cooperative_leaves_kernel<P: PoseidonRunnable>(
     store_intermediate: bool,
     stream: &CudaStream,
 ) -> CudaResult<()> {
-    let get_kernel_fn = P::get_kernel_leaves_cooperative;
+    let kernel_function = P::LEAVES_COOPERATIVE_FUNCTION;
     let get_grid_block_fn = P::get_grid_block_leaves_cooperative;
     launch_leaves_kernel::<P>(
-        get_kernel_fn,
+        kernel_function,
         get_grid_block_fn,
         values,
         results,
@@ -261,7 +215,7 @@ pub fn launch_cooperative_leaves_kernel<P: PoseidonRunnable>(
 
 const NODE_REDUCTION_FACTOR: usize = 2;
 
-pub fn launch_single_thread_nodes_kernel<P: PoseidonRunnable>(
+pub fn launch_single_thread_nodes_kernel<P: PoseidonImpl>(
     values: &DeviceSlice<GoldilocksField>,
     results: &mut DeviceSlice<GoldilocksField>,
     stream: &CudaStream,
@@ -278,20 +232,12 @@ pub fn launch_single_thread_nodes_kernel<P: PoseidonRunnable>(
     assert!(results_len / CAPACITY <= u32::MAX as usize);
     let count = (results_len / CAPACITY) as u32;
     let (grid_dim, block_dim) = P::get_grid_block_nodes_single_thread(count);
-    let args = (&values, &results, &count);
-    unsafe {
-        KernelThreeArgs::launch(
-            P::get_kernel_nodes_single_thread(),
-            grid_dim,
-            block_dim,
-            args,
-            0,
-            stream,
-        )
-    }
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = NodesArguments::new(values, results, count);
+    NodesFunction(P::NODES_SINGLE_THREAD_FUNCTION).launch(&config, &args)
 }
 
-pub fn launch_cooperative_nodes_kernel<P: PoseidonRunnable>(
+pub fn launch_cooperative_nodes_kernel<P: PoseidonImpl>(
     values: &DeviceSlice<GoldilocksField>,
     results: &mut DeviceSlice<GoldilocksField>,
     stream: &CudaStream,
@@ -308,20 +254,12 @@ pub fn launch_cooperative_nodes_kernel<P: PoseidonRunnable>(
     assert!(results_len / CAPACITY <= u32::MAX as usize);
     let count = (results_len / CAPACITY) as u32;
     let (grid_dim, block_dim) = P::get_grid_block_nodes_cooperative(count);
-    let args = (&values, &results, &count);
-    unsafe {
-        KernelThreeArgs::launch(
-            P::get_kernel_nodes_cooperative(),
-            grid_dim,
-            block_dim,
-            args,
-            0,
-            stream,
-        )
-    }
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = NodesArguments::new(values, results, count);
+    NodesFunction(P::NODES_COOPERATIVE_FUNCTION).launch(&config, &args)
 }
 
-pub fn build_merkle_tree_nodes<P: PoseidonRunnable>(
+pub fn build_merkle_tree_nodes<P: PoseidonImpl>(
     values: &DeviceSlice<GoldilocksField>,
     results: &mut DeviceSlice<GoldilocksField>,
     layers_count: u32,
@@ -338,7 +276,7 @@ pub fn build_merkle_tree_nodes<P: PoseidonRunnable>(
         assert_eq!(values_len, RATE << layer);
         assert_eq!(values_len, results_len);
         let (nodes, nodes_remaining) = results.split_at_mut(results_len >> 1);
-        if layer > P::nodes_prefer_single_thread_threshold() {
+        if layer > P::NODES_PREFER_SINGLE_THREAD_THRESHOLD {
             launch_single_thread_nodes_kernel::<P>(values, nodes, stream)?;
         } else {
             launch_cooperative_nodes_kernel::<P>(values, nodes, stream)?;
@@ -347,7 +285,7 @@ pub fn build_merkle_tree_nodes<P: PoseidonRunnable>(
     }
 }
 
-pub fn build_merkle_tree_leaves<P: PoseidonRunnable>(
+pub fn build_merkle_tree_leaves<P: PoseidonImpl>(
     values: &DeviceSlice<GoldilocksField>,
     results: &mut DeviceSlice<GoldilocksField>,
     log_rows_per_hash: u32,
@@ -370,7 +308,7 @@ pub fn build_merkle_tree_leaves<P: PoseidonRunnable>(
     )
 }
 
-pub fn build_merkle_tree<P: PoseidonRunnable>(
+pub fn build_merkle_tree<P: PoseidonImpl>(
     values: &DeviceSlice<GoldilocksField>,
     results: &mut DeviceSlice<GoldilocksField>,
     log_rows_per_hash: u32,
@@ -408,14 +346,15 @@ pub fn gather_rows(
     let indexes_count = indexes_len as u32;
     let (mut grid_dim, block_dim) =
         get_grid_block_dims_for_threads_count(WARP_SIZE >> log_rows_per_index, indexes_count);
-    let block_dim = (rows_per_index, block_dim.x).into();
+    let block_dim = (rows_per_index, block_dim.x);
     assert!(result_cols <= u32::MAX as usize);
     grid_dim.y = result_cols as u32;
     let indexes = indexes.as_ptr();
     let values = values.as_ptr_and_stride();
     let result = result.as_mut_ptr_and_stride();
-    let args = (&indexes, &indexes_count, &values, &result);
-    unsafe { KernelFourArgs::launch(gather_rows_kernel, grid_dim, block_dim, args, 0, stream) }
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = GatherRowsArguments::new(indexes, indexes_count, values, result);
+    GatherRowsFunction::default().launch(&config, &args)
 }
 
 pub fn gather_merkle_paths(
@@ -439,27 +378,14 @@ pub fn gather_merkle_paths(
         results.len()
     );
     let (grid_dim, block_dim) = get_grid_block_dims_for_threads_count(WARP_SIZE, indexes_count);
-    let grid_dim = (grid_dim.x, CAPACITY as u32, layers_count).into();
+    let grid_dim = (grid_dim.x, CAPACITY as u32, layers_count);
     let indexes = indexes.as_ptr();
     let values = values.as_ptr();
     let result = results.as_mut_ptr();
-    let args = (
-        &indexes,
-        &indexes_count,
-        &values,
-        &log_leaves_count,
-        &result,
-    );
-    unsafe {
-        KernelFiveArgs::launch(
-            gather_merkle_paths_kernel,
-            grid_dim,
-            block_dim,
-            args,
-            0,
-            stream,
-        )
-    }
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args =
+        GatherMerklePathsArguments::new(indexes, indexes_count, values, log_leaves_count, result);
+    GatherMerklePathsFunction::default().launch(&config, &args)
 }
 
 #[cfg(test)]
@@ -480,7 +406,7 @@ mod tests {
 
     use super::*;
 
-    pub trait PoseidonTestable: PoseidonRunnable {
+    pub trait PoseidonTestable: PoseidonImpl {
         fn poseidon_permutation_cpu_shim(state: &mut [GoldilocksField; STATE_WIDTH]);
     }
 
@@ -758,13 +684,13 @@ mod tests {
     // #[test]
     // #[ignore]
     // fn merkle_tree_poseidon_large() {
-    //     merkle_tree::<Poseidon>((Poseidon::nodes_prefer_single_thread_threshold() + 3) as usize);
+    //     merkle_tree::<Poseidon>((Poseidon::NODES_PREFER_SINGLE_THREAD_THRESHOLD() + 3) as usize);
     // }
 
     #[test]
     #[ignore]
     fn merkle_tree_poseidon2_large() {
-        merkle_tree::<Poseidon2>((Poseidon2::nodes_prefer_single_thread_threshold() + 3) as usize);
+        merkle_tree::<Poseidon2>((Poseidon2::NODES_PREFER_SINGLE_THREAD_THRESHOLD + 3) as usize);
     }
 
     fn cooperative_matches_single_thread_leaves<P: PoseidonTestable>() {
