@@ -47,8 +47,7 @@ fn case(
     group.warm_up_time(Duration::from_millis(WARM_UP_TIME_MS));
     group.measurement_time(Duration::from_millis(MEASUREMENT_TIME_MS));
     group.sampling_mode(SamplingMode::Flat);
-    // for inverse in [false, true] {
-    for inverse in [false] {
+    for inverse in [false, true] {
         for bitrev_inputs in [false, true] {
             for log_count in log_n_range.clone() {
                 let count: u32 = 1 << log_count;

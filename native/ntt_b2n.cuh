@@ -37,24 +37,23 @@ void b2n_initial_stages_warp(const base_field *gmem_inputs_matrix, base_field *g
       vals[2 * i + 1][1] = in.w;
     }
 
-//     if (log_extension_degree && !inverse) {
-//       if (coset_idx) {
-//         const unsigned shift = OMEGA_LOG_ORDER - log_n - log_extension_degree;
-//         const unsigned offset = coset_idx << shift;
-// #pragma unroll
-//         for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
-//           const unsigned idx = __brev(gmem_offset + 64 * (i >> 1) + 2 * lane_id + (i & 1)) >> (32 - log_n);
-//           auto power_of_w = get_power_of_w(idx * offset, false);
-//           vals[i] = base_field::mul(vals[i], power_of_w);
-//         }
-//       }
-// #pragma unroll
-//       for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
-//         const unsigned idx = __brev(gmem_offset + 64 * (i >> 1) + 2 * lane_id + (i & 1)) >> (32 - log_n);
-//         auto power_of_g = get_power_of_g(idx, false);
-//         vals[i] = base_field::mul(vals[i], power_of_g);
-//       }
-//     }
+    if (log_extension_degree && !inverse) {
+      __syncwarp();
+      base_field tmp[VALS_PER_THREAD];
+      base_field *scratch = twiddle_cache + VALS_PER_THREAD * lane_id;
+#pragma unroll
+      for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
+        tmp[i] = scratch[i];
+        scratch[i] = vals[i];
+      }
+      apply_lde_factors<VALS_PER_THREAD, false>(scratch, gmem_offset, lane_id, log_n, log_extension_degree, coset_idx);
+#pragma unroll
+      for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
+        vals[i] = scratch[i];
+        scratch[i] = tmp[i];
+      }
+      __syncwarp();
+    }
 
     unsigned lane_mask = 1;
     base_field *twiddles_this_stage = twiddle_cache;
@@ -97,7 +96,7 @@ void b2n_initial_stages_warp(const base_field *gmem_inputs_matrix, base_field *g
   }
 }
 
-extern "C" __global__
+extern "C" __launch_bounds__(128, 8) __global__
 void b2n_initial_8_stages_warp(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
                                const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
                                const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
@@ -106,7 +105,7 @@ void b2n_initial_8_stages_warp(const base_field *gmem_inputs_matrix, base_field 
                              stages_this_launch, log_n, inverse, num_ntts, log_extension_degree, coset_idx);
 }
 
-extern "C" __global__
+extern "C" __launch_bounds__(128, 8) __global__
 void b2n_initial_7_stages_warp(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
                                const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
                                const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
@@ -158,24 +157,23 @@ void b2n_initial_stages_block(const base_field *gmem_inputs_matrix, base_field *
       vals[2 * i + 1][1] = pair.w;
     }
 
-//     if (log_extension_degree && !inverse) {
-//       if (coset_idx) {
-//         const unsigned shift = OMEGA_LOG_ORDER - log_n - log_extension_degree;
-//         const unsigned offset = coset_idx << shift;
-// #pragma unroll
-//         for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
-//           const unsigned idx = __brev(gmem_offset + 64 * (i >> 1) + 2 * lane_id + (i & 1)) >> (32 - log_n);
-//           auto power_of_w = get_power_of_w(idx * offset, false);
-//           vals[i] = base_field::mul(vals[i], power_of_w);
-//         }
-//       }
-// #pragma unroll
-//       for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
-//         const unsigned idx = __brev(gmem_offset + 64 * (i >> 1) + 2 * lane_id + (i & 1)) >> (32 - log_n);
-//         auto power_of_g = get_power_of_g(idx, false);
-//         vals[i] = base_field::mul(vals[i], power_of_g);
-//       }
-//     }
+    if (log_extension_degree && !inverse) {
+      __syncwarp();
+      base_field tmp[VALS_PER_THREAD];
+      base_field *scratch = twiddle_cache + VALS_PER_THREAD * lane_id;
+#pragma unroll
+      for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
+        tmp[i] = scratch[i];
+        scratch[i] = vals[i];
+      }
+      apply_lde_factors<VALS_PER_THREAD, false>(scratch, gmem_offset, lane_id, log_n, log_extension_degree, coset_idx);
+#pragma unroll
+      for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
+        vals[i] = scratch[i];
+        scratch[i] = tmp[i];
+      }
+      __syncwarp();
+    }
 
     unsigned lane_mask = 1;
     base_field *twiddles_this_stage = twiddle_cache;
@@ -452,7 +450,8 @@ void b2n_noninitial_stages_block(const base_field *gmem_inputs_matrix, base_fiel
       vals[2 * i + 1][1] = pair.w;
     }
 
-    if (ntt_idx < num_ntts - 1) {
+    const bool is_last_kernel = (start_stage + MAX_STAGES_THIS_LAUNCH - skip_first_stage == log_n);
+    if ((ntt_idx < num_ntts - 1) || (is_last_kernel && log_extension_degree && inverse)) {
       __syncthreads();
       twiddle_cache[lane_id] = tmp;
       __syncwarp(); // maybe unnecessary due to shfls below
@@ -487,40 +486,46 @@ void b2n_noninitial_stages_block(const base_field *gmem_inputs_matrix, base_fiel
       exchg_region_offset >>= 1;
     }
 
-    if (inverse && (start_stage + MAX_STAGES_THIS_LAUNCH - skip_first_stage == log_n)) {
+    if (inverse && is_last_kernel) {
 #pragma unroll
       for (unsigned i = 0; i < VALS_PER_THREAD; i++)
         vals[i] = base_field::mul(vals[i], inv_sizes[log_n]);
-//       if (log_extension_degree) {
-//         if (coset_idx) {
-//           const unsigned shift = OMEGA_LOG_ORDER - log_n - log_extension_degree;
-//           const unsigned offset = coset_idx << shift;
-// #pragma unroll
-//           for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
-//             const unsigned idx0 = gmem_out_offset + 4 * i * tile_stride * WARPS_PER_BLOCK;
-//             const unsigned idx1 = gmem_out_offset + (4 * i  + 2) * tile_stride * WARPS_PER_BLOCK;
-//             auto power_of_w0 = get_power_of_w(idx0 * offset, true);
-//             auto power_of_w1 = get_power_of_w(idx1 * offset, true);
-//             vals[2 * i] = base_field::mul(vals[2 * i], power_of_w0);
-//             vals[2 * i + 1] = base_field::mul(vals[2 * i + 1], power_of_w1);
-//           }
-//         }
-// #pragma unroll
-//         for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
-//           const unsigned idx0 = gmem_out_offset + 4 * i * tile_stride * WARPS_PER_BLOCK;
-//           const unsigned idx1 = gmem_out_offset + (4 * i  + 2) * tile_stride * WARPS_PER_BLOCK;
-//           auto power_of_g0 = get_power_of_g(idx0, true);
-//           auto power_of_g1 = get_power_of_g(idx1, true);
-//           vals[2 * i] = base_field::mul(vals[2 * i], power_of_g0);
-//           vals[2 * i + 1] = base_field::mul(vals[2 * i + 1], power_of_g1);
-//         }
-//       }
     }
 
+    if (inverse && is_last_kernel && log_extension_degree) {
+      __syncwarp();
+      base_field *scratch = twiddle_cache + lane_id;
+      base_field tmp = *scratch;
 #pragma unroll
-    for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
-      memory::store_cs(gmem_out + 4 * i * tile_stride * WARPS_PER_BLOCK, vals[2 * i]);
-      memory::store_cs(gmem_out + (4 * i + 2) * tile_stride * WARPS_PER_BLOCK, vals[2 * i + 1]);
+      for (unsigned i = 0; i < VALS_PER_THREAD; i++)
+        scratch[32 * i] = vals[i];
+#pragma unroll 1
+      for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+        base_field val0 = scratch[64 * i];
+        base_field val1 = scratch[64 * i + 32];
+        const unsigned idx0 = gmem_out_offset + 4 * i * tile_stride * WARPS_PER_BLOCK;
+        const unsigned idx1 = gmem_out_offset + (4 * i  + 2) * tile_stride * WARPS_PER_BLOCK;
+        if (coset_idx) {
+          const unsigned shift = OMEGA_LOG_ORDER - log_n - log_extension_degree;
+          const unsigned offset = coset_idx << shift;
+          auto power_of_w0 = get_power_of_w(idx0 * offset, true);
+          auto power_of_w1 = get_power_of_w(idx1 * offset, true);
+          val0 = base_field::mul(val0, power_of_w0);
+          val1 = base_field::mul(val1, power_of_w1);
+        }
+        auto power_of_g0 = get_power_of_g(idx0, true);
+        auto power_of_g1 = get_power_of_g(idx1, true);
+        memory::store_cs(gmem_out - gmem_out_offset + idx0, base_field::mul(val0, power_of_g0));
+        memory::store_cs(gmem_out - gmem_out_offset + idx1, base_field::mul(val1, power_of_g1));
+      }
+      *scratch = tmp;
+      __syncwarp();
+    } else {
+#pragma unroll
+      for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
+        memory::store_cs(gmem_out + 4 * i * tile_stride * WARPS_PER_BLOCK, vals[2 * i]);
+        memory::store_cs(gmem_out + (4 * i + 2) * tile_stride * WARPS_PER_BLOCK, vals[2 * i + 1]);
+      }
     }
   }
 }

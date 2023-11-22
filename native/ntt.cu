@@ -103,6 +103,25 @@ DEVICE_FORCEINLINE void load_noninitial_twiddles_warp(base_field *twiddle_cache,
   __syncwarp();
 }
 
+// this is a common pattern that happened to arise in several kernels
+template <unsigned VALS_PER_THREAD, bool inverse>
+DEVICE_FORCEINLINE void apply_lde_factors(base_field *scratch, const unsigned gmem_offset, const unsigned lane_id,
+                                     const unsigned log_n, const unsigned log_extension_degree, const unsigned coset_idx) {
+#pragma unroll 1
+  for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
+    base_field val = scratch[i];
+    const unsigned idx = __brev(gmem_offset + 64 * (i >> 1) + 2 * lane_id + (i & 1)) >> (32 - log_n);
+    if (coset_idx) {
+      const unsigned shift = OMEGA_LOG_ORDER - log_n - log_extension_degree;
+      const unsigned offset = coset_idx << shift;
+      auto power_of_w = get_power_of_w(idx * offset, inverse);
+      val = base_field::mul(val, power_of_w);
+    }
+    auto power_of_g = get_power_of_g(idx, inverse);
+    scratch[i] = base_field::mul(val, power_of_g);
+  }
+}
+
 static __device__ constexpr unsigned NTTS_PER_BLOCK = 8;
 
 #include "ntt_b2n.cuh"
