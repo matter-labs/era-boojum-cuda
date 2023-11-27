@@ -316,6 +316,10 @@ void b2n_initial_stages_block(const base_field *gmem_inputs_matrix, base_field *
   }
 }
 
+// Bizarrely, on cuda 12.2 and 12.3:
+// With launch bounds it uses 64 registers per thread AND spills registers.
+// Without launch bounds it still uses 64 registers per thread but DOES NOT spill registers.
+// #justnvccthings
 // extern "C" __launch_bounds__(512, 2) __global__
 extern "C" __global__
 void b2n_initial_9_to_12_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
