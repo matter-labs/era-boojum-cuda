@@ -45,6 +45,6 @@ set_target_properties(boojum-cuda-native PROPERTIES CUDA_SEPARABLE_COMPILATION O
 set_target_properties(boojum-cuda-native PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 target_compile_options(boojum-cuda-native PRIVATE --expt-relaxed-constexpr)
 target_compile_options(boojum-cuda-native PRIVATE --ptxas-options=-v)
-target_compile_options(boojum-cuda-native PRIVATE -lineinfo)
+# target_compile_options(boojum-cuda-native PRIVATE -lineinfo)
 #target_compile_options(boojum-cuda-native PRIVATE --keep)
 install(TARGETS boojum-cuda-native DESTINATION .)

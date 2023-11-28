@@ -1,11 +1,11 @@
 #pragma once // also, this file should only be compiled in one compile unit because it has __global__ definitions
 
 // This kernel basically reverses the pattern of the b2n_initial_stages_warp kernel.
-template <unsigned LOG_VALS_PER_THREAD> DEVICE_FORCEINLINE
-void n2b_final_stages_warp(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
-                           const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
-                           const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
-                           const unsigned coset_idx) {
+template <unsigned LOG_VALS_PER_THREAD>
+DEVICE_FORCEINLINE void n2b_final_stages_warp(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                                              const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                                              const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
+                                              const unsigned coset_idx) {
   constexpr unsigned VALS_PER_THREAD = 1 << LOG_VALS_PER_THREAD;
   constexpr unsigned PAIRS_PER_THREAD = VALS_PER_THREAD >> 1;
   constexpr unsigned VALS_PER_WARP = 32 * VALS_PER_THREAD;
@@ -27,8 +27,7 @@ void n2b_final_stages_warp(const base_field *gmem_inputs_matrix, base_field *gme
   load_initial_twiddles_warp<VALS_PER_WARP, LOG_VALS_PER_THREAD>(twiddle_cache, lane_id, gmem_offset, inverse);
 
   const unsigned bound = std::min(NTTS_PER_BLOCK, num_ntts - NTTS_PER_BLOCK * blockIdx.y);
-  for (unsigned ntt_idx = 0; ntt_idx < bound;
-       ntt_idx++, gmem_in += stride_between_input_arrays, gmem_out += stride_between_output_arrays) {
+  for (unsigned ntt_idx = 0; ntt_idx < bound; ntt_idx++, gmem_in += stride_between_input_arrays, gmem_out += stride_between_output_arrays) {
 #pragma unroll
     for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
       vals[2 * i] = memory::load_cs(gmem_in + 64 * i + lane_id);
@@ -85,7 +84,7 @@ void n2b_final_stages_warp(const base_field *gmem_inputs_matrix, base_field *gme
 #pragma unroll
       for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
         const uint4 out{scratch[2 * i][0], scratch[2 * i][1], scratch[2 * i + 1][0], scratch[2 * i + 1][1]};
-        memory::store_cs(reinterpret_cast<uint4*>(gmem_out + 64 * i + 2 * lane_id), out);
+        memory::store_cs(reinterpret_cast<uint4 *>(gmem_out + 64 * i + 2 * lane_id), out);
       }
 #pragma unroll
       for (unsigned i = 0; i < VALS_PER_THREAD; i++)
@@ -95,36 +94,36 @@ void n2b_final_stages_warp(const base_field *gmem_inputs_matrix, base_field *gme
 #pragma unroll
       for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
         const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
-        memory::store_cs(reinterpret_cast<uint4*>(gmem_out + 64 * i + 2 * lane_id), out);
+        memory::store_cs(reinterpret_cast<uint4 *>(gmem_out + 64 * i + 2 * lane_id), out);
       }
     }
   }
 }
 
 extern "C" __launch_bounds__(128, 8) __global__
-void n2b_final_8_stages_warp(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
-                             const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
-                             const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
-                             const unsigned coset_idx) {
-  n2b_final_stages_warp<3>(gmem_inputs_matrix, gmem_outputs_matrix, stride_between_input_arrays, stride_between_output_arrays, start_stage,
-                           stages_this_launch, log_n, inverse, num_ntts, log_extension_degree, coset_idx);
+    void n2b_final_8_stages_warp(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                                 const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                                 const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
+                                 const unsigned coset_idx) {
+  n2b_final_stages_warp<3>(gmem_inputs_matrix, gmem_outputs_matrix, stride_between_input_arrays, stride_between_output_arrays, start_stage, stages_this_launch,
+                           log_n, inverse, num_ntts, log_extension_degree, coset_idx);
 }
 
 extern "C" __launch_bounds__(128, 8) __global__
-void n2b_final_7_stages_warp(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
-                             const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
-                             const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
-                             const unsigned coset_idx) {
-  n2b_final_stages_warp<2>(gmem_inputs_matrix, gmem_outputs_matrix, stride_between_input_arrays, stride_between_output_arrays, start_stage,
-                           stages_this_launch, log_n, inverse, num_ntts, log_extension_degree, coset_idx);
+    void n2b_final_7_stages_warp(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                                 const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                                 const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
+                                 const unsigned coset_idx) {
+  n2b_final_stages_warp<2>(gmem_inputs_matrix, gmem_outputs_matrix, stride_between_input_arrays, stride_between_output_arrays, start_stage, stages_this_launch,
+                           log_n, inverse, num_ntts, log_extension_degree, coset_idx);
 }
 
 // This kernel basically reverses the pattern of the b2n_initial_stages_block kernel.
-template <unsigned LOG_VALS_PER_THREAD> DEVICE_FORCEINLINE
-void n2b_final_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
-                            const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
-                            const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
-                            const unsigned coset_idx) {
+template <unsigned LOG_VALS_PER_THREAD>
+DEVICE_FORCEINLINE void n2b_final_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix,
+                                               const unsigned stride_between_input_arrays, const unsigned stride_between_output_arrays,
+                                               const unsigned start_stage, const unsigned stages_this_launch, const unsigned log_n, const bool inverse,
+                                               const unsigned num_ntts, const unsigned log_extension_degree, const unsigned coset_idx) {
   constexpr unsigned VALS_PER_THREAD = 1 << LOG_VALS_PER_THREAD;
   constexpr unsigned PAIRS_PER_THREAD = VALS_PER_THREAD >> 1;
   constexpr unsigned VALS_PER_WARP = 32 * VALS_PER_THREAD;
@@ -140,8 +139,7 @@ void n2b_final_stages_block(const base_field *gmem_inputs_matrix, base_field *gm
   const unsigned gmem_offset = gmem_block_offset + VALS_PER_WARP * warp_id;
   // annoyingly scrambled, but should be coalesced overall
   const unsigned gmem_in_thread_offset = 16 * warp_id + VALS_PER_WARP * (lane_id >> 4) + 2 * (lane_id & 7) + ((lane_id >> 3) & 1);
-  const base_field *gmem_in = gmem_inputs_matrix + gmem_block_offset + gmem_in_thread_offset +
-                              NTTS_PER_BLOCK * stride_between_input_arrays * blockIdx.y;
+  const base_field *gmem_in = gmem_inputs_matrix + gmem_block_offset + gmem_in_thread_offset + NTTS_PER_BLOCK * stride_between_input_arrays * blockIdx.y;
   base_field *gmem_out = gmem_outputs_matrix + gmem_offset + NTTS_PER_BLOCK * stride_between_output_arrays * blockIdx.y;
 
   auto twiddle_cache = smem + VALS_PER_WARP * warp_id;
@@ -149,8 +147,7 @@ void n2b_final_stages_block(const base_field *gmem_inputs_matrix, base_field *gm
   base_field vals[VALS_PER_THREAD];
 
   const unsigned bound = std::min(NTTS_PER_BLOCK, num_ntts - NTTS_PER_BLOCK * blockIdx.y);
-  for (unsigned ntt_idx = 0; ntt_idx < bound;
-       ntt_idx++, gmem_in += stride_between_input_arrays, gmem_out += stride_between_output_arrays) {
+  for (unsigned ntt_idx = 0; ntt_idx < bound; ntt_idx++, gmem_in += stride_between_input_arrays, gmem_out += stride_between_output_arrays) {
 #pragma unroll
     for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
       vals[2 * i] = memory::load_cs(gmem_in + 4 * i * VALS_PER_WARP);
@@ -210,14 +207,14 @@ void n2b_final_stages_block(const base_field *gmem_inputs_matrix, base_field *gm
 
 #pragma unroll
         for (unsigned i = 0; i < PAIRS_PER_THREAD; i++, pair_addr += 4 * VALS_PER_WARP) {
-          uint4* pair = reinterpret_cast<uint4*>(pair_addr);
+          uint4 *pair = reinterpret_cast<uint4 *>(pair_addr);
           const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
           *pair = out;
         }
       } else {
 #pragma unroll
         for (unsigned i = 0; i < PAIRS_PER_THREAD; i++, pair_addr += 4 * VALS_PER_WARP) {
-          uint4* pair = reinterpret_cast<uint4*>(pair_addr);
+          uint4 *pair = reinterpret_cast<uint4 *>(pair_addr);
           const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
           *pair = out;
         }
@@ -242,7 +239,7 @@ void n2b_final_stages_block(const base_field *gmem_inputs_matrix, base_field *gm
           vals[2 * i + 1] = twiddle_cache[64 * i + lane_id + 32];
         }
 
-         __syncwarp();
+        __syncwarp();
 
         load_initial_twiddles_warp<VALS_PER_WARP, LOG_VALS_PER_THREAD>(twiddle_cache, lane_id, gmem_offset, inverse);
       }
@@ -298,7 +295,7 @@ void n2b_final_stages_block(const base_field *gmem_inputs_matrix, base_field *gm
 #pragma unroll
       for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
         const uint4 out{scratch[2 * i][0], scratch[2 * i][1], scratch[2 * i + 1][0], scratch[2 * i + 1][1]};
-        memory::store_cs(reinterpret_cast<uint4*>(gmem_out + 64 * i + 2 * lane_id), out);
+        memory::store_cs(reinterpret_cast<uint4 *>(gmem_out + 64 * i + 2 * lane_id), out);
       }
 #pragma unroll
       for (unsigned i = 0; i < VALS_PER_THREAD; i++)
@@ -308,27 +305,27 @@ void n2b_final_stages_block(const base_field *gmem_inputs_matrix, base_field *gm
 #pragma unroll
       for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
         const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
-        memory::store_cs(reinterpret_cast<uint4*>(gmem_out + 64 * i + 2 * lane_id), out);
+        memory::store_cs(reinterpret_cast<uint4 *>(gmem_out + 64 * i + 2 * lane_id), out);
       }
     }
   }
 }
 
 extern "C" __launch_bounds__(512, 2) __global__
-void n2b_final_9_to_12_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
-                                    const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
-                                    const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
-                                    const unsigned coset_idx) {
-  n2b_final_stages_block<3>(gmem_inputs_matrix, gmem_outputs_matrix, stride_between_input_arrays, stride_between_output_arrays, start_stage,
-                            stages_this_launch, log_n, inverse, num_ntts, log_extension_degree, coset_idx);
+    void n2b_final_9_to_12_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                                        const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                                        const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
+                                        const unsigned coset_idx) {
+  n2b_final_stages_block<3>(gmem_inputs_matrix, gmem_outputs_matrix, stride_between_input_arrays, stride_between_output_arrays, start_stage, stages_this_launch,
+                            log_n, inverse, num_ntts, log_extension_degree, coset_idx);
 }
 
 // This kernel basically reverses the pattern of the b2n_noninitial_stages_block kernel.
-template <unsigned LOG_VALS_PER_THREAD> DEVICE_FORCEINLINE
-void n2b_nonfinal_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
-                            const unsigned stride_between_output_arrays, const unsigned start_stage, const bool skip_last_stage,
-                            const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
-                            const unsigned coset_idx) {
+template <unsigned LOG_VALS_PER_THREAD>
+DEVICE_FORCEINLINE void n2b_nonfinal_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix,
+                                                  const unsigned stride_between_input_arrays, const unsigned stride_between_output_arrays,
+                                                  const unsigned start_stage, const bool skip_last_stage, const unsigned log_n, const bool inverse,
+                                                  const unsigned num_ntts, const unsigned log_extension_degree, const unsigned coset_idx) {
   constexpr unsigned VALS_PER_THREAD = 1 << LOG_VALS_PER_THREAD;
   constexpr unsigned PAIRS_PER_THREAD = VALS_PER_THREAD >> 1;
   constexpr unsigned VALS_PER_WARP = 32 * VALS_PER_THREAD;
@@ -351,20 +348,18 @@ void n2b_nonfinal_stages_block(const base_field *gmem_inputs_matrix, base_field 
   const unsigned block_bfly_region_start = block_bfly_region * block_bfly_region_size;
   const unsigned block_start_in_bfly_region = 16 * (blockIdx.x & ((1 << log_blocks_per_region) - 1));
   // annoyingly scrambled, but should be coalesced overall
-  const unsigned gmem_in_thread_offset = tile_stride * warp_id + tile_stride * WARPS_PER_BLOCK * (lane_id >> 4)
-                                       + 2 * (lane_id & 7) + ((lane_id >> 3) & 1);
+  const unsigned gmem_in_thread_offset = tile_stride * warp_id + tile_stride * WARPS_PER_BLOCK * (lane_id >> 4) + 2 * (lane_id & 7) + ((lane_id >> 3) & 1);
   const unsigned gmem_in_offset = block_bfly_region_start + block_start_in_bfly_region + gmem_in_thread_offset;
   const base_field *gmem_in = gmem_inputs_matrix + gmem_in_offset + NTTS_PER_BLOCK * stride_between_input_arrays * blockIdx.y;
-  base_field *gmem_out = gmem_outputs_matrix + block_bfly_region_start + block_start_in_bfly_region +
-                         NTTS_PER_BLOCK * stride_between_output_arrays * blockIdx.y;
+  base_field *gmem_out =
+      gmem_outputs_matrix + block_bfly_region_start + block_start_in_bfly_region + NTTS_PER_BLOCK * stride_between_output_arrays * blockIdx.y;
 
   auto twiddle_cache = smem + VALS_PER_WARP * warp_id;
 
   base_field vals[VALS_PER_THREAD];
 
   const unsigned bound = std::min(NTTS_PER_BLOCK, num_ntts - NTTS_PER_BLOCK * blockIdx.y);
-  for (unsigned ntt_idx = 0; ntt_idx < bound;
-       ntt_idx++, gmem_in += stride_between_input_arrays, gmem_out += stride_between_output_arrays) {
+  for (unsigned ntt_idx = 0; ntt_idx < bound; ntt_idx++, gmem_in += stride_between_input_arrays, gmem_out += stride_between_output_arrays) {
 #pragma unroll
     for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
       vals[2 * i] = memory::load_cs(gmem_in + 4 * i * tile_stride * WARPS_PER_BLOCK);
@@ -383,7 +378,7 @@ void n2b_nonfinal_stages_block(const base_field *gmem_inputs_matrix, base_field 
         base_field val0 = scratch[64 * i];
         base_field val1 = scratch[64 * i + 32];
         const unsigned idx0 = gmem_in_offset + 4 * i * tile_stride * WARPS_PER_BLOCK;
-        const unsigned idx1 = gmem_in_offset + (4 * i  + 2) * tile_stride * WARPS_PER_BLOCK;
+        const unsigned idx1 = gmem_in_offset + (4 * i + 2) * tile_stride * WARPS_PER_BLOCK;
         if (coset_idx) {
           const unsigned shift = OMEGA_LOG_ORDER - log_n - log_extension_degree;
           const unsigned offset = coset_idx << shift;
@@ -444,7 +439,7 @@ void n2b_nonfinal_stages_block(const base_field *gmem_inputs_matrix, base_field 
     auto smem_pair_addr = smem + 16 * warp_id + VALS_PER_WARP * (lane_id >> 3) + 2 * (threadIdx.x & 7);
 #pragma unroll
     for (unsigned i = 0; i < PAIRS_PER_THREAD; i++, smem_pair_addr += 4 * VALS_PER_WARP) {
-      uint4* pair = reinterpret_cast<uint4*>(smem_pair_addr);
+      uint4 *pair = reinterpret_cast<uint4 *>(smem_pair_addr);
       const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
       *pair = out;
     }
@@ -465,8 +460,7 @@ void n2b_nonfinal_stages_block(const base_field *gmem_inputs_matrix, base_field 
       twiddle_cache[lane_id] = tmp;
       __syncwarp();
     } else {
-      load_noninitial_twiddles_warp<LOG_VALS_PER_THREAD>(twiddle_cache, lane_id, warp_id,
-                                                         block_bfly_region * EXCHG_REGIONS_PER_BLOCK, inverse);
+      load_noninitial_twiddles_warp<LOG_VALS_PER_THREAD>(twiddle_cache, lane_id, warp_id, block_bfly_region * EXCHG_REGIONS_PER_BLOCK, inverse);
     }
 
     base_field *twiddles_this_stage = twiddle_cache + 2 * VALS_PER_THREAD - 2;
@@ -515,7 +509,7 @@ void n2b_nonfinal_stages_block(const base_field *gmem_inputs_matrix, base_field 
 #pragma unroll
       for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
         const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
-        memory::store_cs(reinterpret_cast<uint4*>(pair_addr), out);
+        memory::store_cs(reinterpret_cast<uint4 *>(pair_addr), out);
         pair_addr += 4 * tile_stride;
       }
     }
@@ -523,10 +517,10 @@ void n2b_nonfinal_stages_block(const base_field *gmem_inputs_matrix, base_field 
 }
 
 extern "C" __launch_bounds__(512, 2) __global__
-void n2b_nonfinal_7_or_8_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
-                                      const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
-                                      const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
-                                      const unsigned coset_idx) {
+    void n2b_nonfinal_7_or_8_stages_block(const base_field *gmem_inputs_matrix, base_field *gmem_outputs_matrix, const unsigned stride_between_input_arrays,
+                                          const unsigned stride_between_output_arrays, const unsigned start_stage, const unsigned stages_this_launch,
+                                          const unsigned log_n, const bool inverse, const unsigned num_ntts, const unsigned log_extension_degree,
+                                          const unsigned coset_idx) {
   n2b_nonfinal_stages_block<3>(gmem_inputs_matrix, gmem_outputs_matrix, stride_between_input_arrays, stride_between_output_arrays, start_stage,
                                stages_this_launch == 7, log_n, inverse, num_ntts, log_extension_degree, coset_idx);
 }

@@ -51,8 +51,7 @@ DEVICE_FORCEINLINE void shfl_xor_bf(base_field *vals, const unsigned i, const un
 }
 
 template <unsigned VALS_PER_WARP, unsigned LOG_VALS_PER_THREAD>
-DEVICE_FORCEINLINE void load_initial_twiddles_warp(base_field *twiddle_cache, const unsigned lane_id, const unsigned gmem_offset,
-                                                   const bool inverse) {
+DEVICE_FORCEINLINE void load_initial_twiddles_warp(base_field *twiddle_cache, const unsigned lane_id, const unsigned gmem_offset, const bool inverse) {
   // cooperatively loads all the twiddles this warp needs for intrawarp stages
   base_field *twiddles_this_stage = twiddle_cache;
   unsigned num_twiddles_this_stage = VALS_PER_WARP >> 1;
@@ -74,7 +73,7 @@ DEVICE_FORCEINLINE void load_initial_twiddles_warp(base_field *twiddle_cache, co
   const unsigned mask = (1 << (32 - lz)) - 1;
   if (lane_id > 0) {
     exchg_region_offset >>= stage_offset;
-    twiddles_this_stage[lane_id^31] = get_twiddle(inverse, (lane_id^mask) + exchg_region_offset);
+    twiddles_this_stage[lane_id ^ 31] = get_twiddle(inverse, (lane_id ^ mask) + exchg_region_offset);
   }
 
   __syncwarp();
@@ -97,7 +96,7 @@ DEVICE_FORCEINLINE void load_noninitial_twiddles_warp(base_field *twiddle_cache,
     const unsigned stage_offset = NUM_INTRAWARP_STAGES - (32 - lz);
     const unsigned mask = (1 << (32 - lz)) - 1;
     exchg_region_offset >>= stage_offset;
-    twiddle_cache[lane_id^(2 * num_twiddles_first_stage - 1)] = get_twiddle(inverse, (lane_id^mask) + exchg_region_offset);
+    twiddle_cache[lane_id ^ (2 * num_twiddles_first_stage - 1)] = get_twiddle(inverse, (lane_id ^ mask) + exchg_region_offset);
   }
 
   __syncwarp();
@@ -105,8 +104,8 @@ DEVICE_FORCEINLINE void load_noninitial_twiddles_warp(base_field *twiddle_cache,
 
 // this is a common pattern that happened to arise in several kernels
 template <unsigned VALS_PER_THREAD, bool inverse>
-DEVICE_FORCEINLINE void apply_lde_factors(base_field *scratch, const unsigned gmem_offset, const unsigned lane_id,
-                                     const unsigned log_n, const unsigned log_extension_degree, const unsigned coset_idx) {
+DEVICE_FORCEINLINE void apply_lde_factors(base_field *scratch, const unsigned gmem_offset, const unsigned lane_id, const unsigned log_n,
+                                          const unsigned log_extension_degree, const unsigned coset_idx) {
 #pragma unroll 1
   for (unsigned i = 0; i < VALS_PER_THREAD; i++) {
     base_field val = scratch[i];
