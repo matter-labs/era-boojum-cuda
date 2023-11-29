@@ -7,7 +7,7 @@ use cudart::kernel_args;
 use cudart::result::{CudaResult, CudaResultWrap};
 use cudart::slice::DeviceSlice;
 use cudart::stream::CudaStream;
-use cudart_sys::cudaLaunchKernel;
+use cudart_sys::{cudaLaunchKernel, dim3};
 
 use crate::context::OMEGA_LOG_ORDER;
 
@@ -25,7 +25,8 @@ extern "C" {
         log_extension_degree: u32,
         coset_index: u32,
     );
-    fn n2b_final_7_or_8_stages(
+
+    fn n2b_final_7_stages_warp(
         inputs_matrix: *const GoldilocksField,
         outputs_matrix: *mut GoldilocksField,
         stride_between_input_arrays: u32,
@@ -34,11 +35,12 @@ extern "C" {
         stages_this_launch: u32,
         log_n: u32,
         inverse: bool,
-        blocks_per_ntt: u32,
+        num_ntts: u32,
         log_extension_degree: u32,
         coset_index: u32,
     );
-    fn n2b_final_9_to_12_stages(
+
+    fn n2b_final_8_stages_warp(
         inputs_matrix: *const GoldilocksField,
         outputs_matrix: *mut GoldilocksField,
         stride_between_input_arrays: u32,
@@ -47,11 +49,12 @@ extern "C" {
         stages_this_launch: u32,
         log_n: u32,
         inverse: bool,
-        blocks_per_ntt: u32,
+        num_ntts: u32,
         log_extension_degree: u32,
         coset_index: u32,
     );
-    fn n2b_nonfinal_7_or_8_stages(
+
+    fn n2b_final_9_to_12_stages_block(
         inputs_matrix: *const GoldilocksField,
         outputs_matrix: *mut GoldilocksField,
         stride_between_input_arrays: u32,
@@ -60,10 +63,25 @@ extern "C" {
         stages_this_launch: u32,
         log_n: u32,
         inverse: bool,
-        blocks_per_ntt: u32,
+        num_ntts: u32,
         log_extension_degree: u32,
         coset_index: u32,
     );
+
+    fn n2b_nonfinal_7_or_8_stages_block(
+        inputs_matrix: *const GoldilocksField,
+        outputs_matrix: *mut GoldilocksField,
+        stride_between_input_arrays: u32,
+        stride_between_output_arrays: u32,
+        start_stage: u32,
+        stages_this_launch: u32,
+        log_n: u32,
+        inverse: bool,
+        num_ntts: u32,
+        log_extension_degree: u32,
+        coset_index: u32,
+    );
+
     fn b2n_1_stage(
         inputs_matrix: *const GoldilocksField,
         outputs_matrix: *mut GoldilocksField,
@@ -77,7 +95,8 @@ extern "C" {
         log_extension_degree: u32,
         coset_index: u32,
     );
-    fn b2n_initial_7_or_8_stages(
+
+    fn b2n_initial_7_stages_warp(
         inputs_matrix: *const GoldilocksField,
         outputs_matrix: *mut GoldilocksField,
         stride_between_input_arrays: u32,
@@ -86,11 +105,12 @@ extern "C" {
         stages_this_launch: u32,
         log_n: u32,
         inverse: bool,
-        blocks_per_ntt: u32,
+        num_ntts: u32,
         log_extension_degree: u32,
         coset_index: u32,
     );
-    fn b2n_initial_9_to_12_stages(
+
+    fn b2n_initial_8_stages_warp(
         inputs_matrix: *const GoldilocksField,
         outputs_matrix: *mut GoldilocksField,
         stride_between_input_arrays: u32,
@@ -99,11 +119,12 @@ extern "C" {
         stages_this_launch: u32,
         log_n: u32,
         inverse: bool,
-        blocks_per_ntt: u32,
+        num_ntts: u32,
         log_extension_degree: u32,
         coset_index: u32,
     );
-    fn b2n_noninitial_7_or_8_stages(
+
+    fn b2n_initial_9_to_12_stages_block(
         inputs_matrix: *const GoldilocksField,
         outputs_matrix: *mut GoldilocksField,
         stride_between_input_arrays: u32,
@@ -112,7 +133,21 @@ extern "C" {
         stages_this_launch: u32,
         log_n: u32,
         inverse: bool,
-        blocks_per_ntt: u32,
+        num_ntts: u32,
+        log_extension_degree: u32,
+        coset_index: u32,
+    );
+
+    fn b2n_noninitial_7_or_8_stages_block(
+        inputs_matrix: *const GoldilocksField,
+        outputs_matrix: *mut GoldilocksField,
+        stride_between_input_arrays: u32,
+        stride_between_output_arrays: u32,
+        start_stage: u32,
+        stages_this_launch: u32,
+        log_n: u32,
+        inverse: bool,
+        num_ntts: u32,
         log_extension_degree: u32,
         coset_index: u32,
     );
@@ -121,12 +156,14 @@ extern "C" {
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
 enum KERN {
-    N2B_FINAL_7_OR_8(u32),
-    N2B_FINAL_9_TO_12(u32),
-    N2B_NONFINAL_7_OR_8(u32),
-    B2N_INITIAL_7_OR_8(u32),
-    B2N_INITIAL_9_TO_12(u32),
-    B2N_NONINITIAL_7_OR_8(u32),
+    N2B_FINAL_7_WARP(u32),
+    N2B_FINAL_8_WARP(u32),
+    N2B_FINAL_9_TO_12_BLOCK(u32),
+    N2B_NONFINAL_7_OR_8_BLOCK(u32),
+    B2N_INITIAL_7_WARP(u32),
+    B2N_INITIAL_8_WARP(u32),
+    B2N_INITIAL_9_TO_12_BLOCK(u32),
+    B2N_NONINITIAL_7_OR_8_BLOCK(u32),
     SKIP,
 }
 
@@ -137,103 +174,103 @@ enum KERN {
 const PLANS: [[[KERN; 3]; 9]; 2] = [
     [
         [
-            KERN::N2B_NONFINAL_7_OR_8(8),
-            KERN::N2B_FINAL_7_OR_8(8),
+            KERN::N2B_NONFINAL_7_OR_8_BLOCK(8),
+            KERN::N2B_FINAL_8_WARP(8),
             KERN::SKIP,
         ],
         [
-            KERN::N2B_NONFINAL_7_OR_8(8),
-            KERN::N2B_FINAL_9_TO_12(9),
+            KERN::N2B_NONFINAL_7_OR_8_BLOCK(8),
+            KERN::N2B_FINAL_9_TO_12_BLOCK(9),
             KERN::SKIP,
         ],
         [
-            KERN::N2B_NONFINAL_7_OR_8(8),
-            KERN::N2B_FINAL_9_TO_12(10),
+            KERN::N2B_NONFINAL_7_OR_8_BLOCK(8),
+            KERN::N2B_FINAL_9_TO_12_BLOCK(10),
             KERN::SKIP,
         ],
         [
-            KERN::N2B_NONFINAL_7_OR_8(8),
-            KERN::N2B_FINAL_9_TO_12(11),
+            KERN::N2B_NONFINAL_7_OR_8_BLOCK(8),
+            KERN::N2B_FINAL_9_TO_12_BLOCK(11),
             KERN::SKIP,
         ],
         [
-            KERN::N2B_NONFINAL_7_OR_8(8),
-            KERN::N2B_FINAL_9_TO_12(12),
+            KERN::N2B_NONFINAL_7_OR_8_BLOCK(8),
+            KERN::N2B_FINAL_9_TO_12_BLOCK(12),
             KERN::SKIP,
         ],
         [
-            KERN::N2B_NONFINAL_7_OR_8(7),
-            KERN::N2B_NONFINAL_7_OR_8(7),
-            KERN::N2B_FINAL_7_OR_8(7),
+            KERN::N2B_NONFINAL_7_OR_8_BLOCK(7),
+            KERN::N2B_NONFINAL_7_OR_8_BLOCK(7),
+            KERN::N2B_FINAL_7_WARP(7),
         ],
         [
-            KERN::N2B_NONFINAL_7_OR_8(7),
-            KERN::N2B_NONFINAL_7_OR_8(7),
-            KERN::N2B_FINAL_7_OR_8(8),
+            KERN::N2B_NONFINAL_7_OR_8_BLOCK(7),
+            KERN::N2B_NONFINAL_7_OR_8_BLOCK(7),
+            KERN::N2B_FINAL_8_WARP(8),
         ],
         [
-            KERN::N2B_NONFINAL_7_OR_8(7),
-            KERN::N2B_NONFINAL_7_OR_8(8),
-            KERN::N2B_FINAL_7_OR_8(8),
+            KERN::N2B_NONFINAL_7_OR_8_BLOCK(7),
+            KERN::N2B_NONFINAL_7_OR_8_BLOCK(8),
+            KERN::N2B_FINAL_8_WARP(8),
         ],
         [
-            KERN::N2B_NONFINAL_7_OR_8(8),
-            KERN::N2B_NONFINAL_7_OR_8(8),
-            KERN::N2B_FINAL_7_OR_8(8),
+            KERN::N2B_NONFINAL_7_OR_8_BLOCK(8),
+            KERN::N2B_NONFINAL_7_OR_8_BLOCK(8),
+            KERN::N2B_FINAL_8_WARP(8),
         ],
     ],
     [
         [
-            KERN::B2N_INITIAL_7_OR_8(8),
-            KERN::B2N_NONINITIAL_7_OR_8(8),
+            KERN::B2N_INITIAL_8_WARP(8),
+            KERN::B2N_NONINITIAL_7_OR_8_BLOCK(8),
             KERN::SKIP,
         ],
         [
-            KERN::B2N_INITIAL_9_TO_12(9),
-            KERN::B2N_NONINITIAL_7_OR_8(8),
+            KERN::B2N_INITIAL_9_TO_12_BLOCK(9),
+            KERN::B2N_NONINITIAL_7_OR_8_BLOCK(8),
             KERN::SKIP,
         ],
         [
-            KERN::B2N_INITIAL_9_TO_12(10),
-            KERN::B2N_NONINITIAL_7_OR_8(8),
+            KERN::B2N_INITIAL_9_TO_12_BLOCK(10),
+            KERN::B2N_NONINITIAL_7_OR_8_BLOCK(8),
             KERN::SKIP,
         ],
         [
-            KERN::B2N_INITIAL_9_TO_12(11),
-            KERN::B2N_NONINITIAL_7_OR_8(8),
+            KERN::B2N_INITIAL_9_TO_12_BLOCK(11),
+            KERN::B2N_NONINITIAL_7_OR_8_BLOCK(8),
             KERN::SKIP,
         ],
         [
-            KERN::B2N_INITIAL_9_TO_12(12),
-            KERN::B2N_NONINITIAL_7_OR_8(8),
+            KERN::B2N_INITIAL_9_TO_12_BLOCK(12),
+            KERN::B2N_NONINITIAL_7_OR_8_BLOCK(8),
             KERN::SKIP,
         ],
         [
-            KERN::B2N_INITIAL_7_OR_8(7),
-            KERN::B2N_NONINITIAL_7_OR_8(7),
-            KERN::B2N_NONINITIAL_7_OR_8(7),
+            KERN::B2N_INITIAL_7_WARP(7),
+            KERN::B2N_NONINITIAL_7_OR_8_BLOCK(7),
+            KERN::B2N_NONINITIAL_7_OR_8_BLOCK(7),
         ],
         [
-            KERN::B2N_INITIAL_7_OR_8(8),
-            KERN::B2N_NONINITIAL_7_OR_8(7),
-            KERN::B2N_NONINITIAL_7_OR_8(7),
+            KERN::B2N_INITIAL_8_WARP(8),
+            KERN::B2N_NONINITIAL_7_OR_8_BLOCK(7),
+            KERN::B2N_NONINITIAL_7_OR_8_BLOCK(7),
         ],
         [
-            KERN::B2N_INITIAL_7_OR_8(8),
-            KERN::B2N_NONINITIAL_7_OR_8(8),
-            KERN::B2N_NONINITIAL_7_OR_8(7),
+            KERN::B2N_INITIAL_8_WARP(8),
+            KERN::B2N_NONINITIAL_7_OR_8_BLOCK(8),
+            KERN::B2N_NONINITIAL_7_OR_8_BLOCK(7),
         ],
         [
-            KERN::B2N_INITIAL_7_OR_8(8),
-            KERN::B2N_NONINITIAL_7_OR_8(8),
-            KERN::B2N_NONINITIAL_7_OR_8(8),
+            KERN::B2N_INITIAL_8_WARP(8),
+            KERN::B2N_NONINITIAL_7_OR_8_BLOCK(8),
+            KERN::B2N_NONINITIAL_7_OR_8_BLOCK(8),
         ],
     ],
 ];
 
 #[allow(clippy::too_many_arguments)]
 fn launch(
-    nblocks: u32,
+    nblocks: dim3,
     nthreads: u32,
     smem_bytes: usize,
     stream: &CudaStream,
@@ -266,7 +303,7 @@ fn launch(
         );
         cudaLaunchKernel(
             kernel,
-            nblocks.into(),
+            nblocks,
             nthreads.into(),
             args.as_mut_ptr(),
             smem_bytes,
@@ -275,6 +312,11 @@ fn launch(
         .wrap()
     }
 }
+
+// Each block strides across up to at most NTTS_PER_BLOCK ntts in a batch.
+// This is just to boost occupancy and reduce tail effect for larger batches.
+// The value here must match NTTS_PER_BLOCK in native/ntt.cu.
+const NTTS_PER_BLOCK: u32 = 8;
 
 // Carries out LDE for all cosets in a single launch, which improves saturation for smaller sizes.
 // results must contain 2^log_extension_degree DeviceAllocationSlices, to hold all the output cosets.
@@ -292,7 +334,6 @@ pub fn batch_ntt_internal(
     coset_index: u32,
     stream: &CudaStream,
 ) -> CudaResult<()> {
-    const PADDED_WARP_SCRATCH_SIZE: usize = (256 / 16) * 17 + 1;
     assert!(log_n >= 1);
     assert!((log_n + log_extension_degree) <= OMEGA_LOG_ORDER);
     let n = 1 << log_n;
@@ -326,7 +367,7 @@ pub fn batch_ntt_internal(
                 stride_between_output_arrays
             };
             launch(
-                blocks,
+                blocks.into(),
                 threads,
                 0,
                 stream,
@@ -350,11 +391,6 @@ pub fn batch_ntt_internal(
     let mut stage: u32 = 0;
     for kernel in plan {
         let start_stage = stage;
-        // grid and block size for smem kernels
-        let blocks_per_ntt_smem: u32 = n / 4096;
-        let nthreads_smem: u32 = 512;
-        let smem_bytes: usize = (512 / 32) * PADDED_WARP_SCRATCH_SIZE * 8;
-        let total_blocks_smem: u32 = blocks_per_ntt_smem * num_ntts;
         // Raw input pointers
         let inputs_ptr = if stage == 0 {
             inputs_ptr_in
@@ -366,15 +402,16 @@ pub fn batch_ntt_internal(
         } else {
             stride_between_output_arrays
         };
+        let num_chunks = (num_ntts + NTTS_PER_BLOCK - 1) / NTTS_PER_BLOCK;
         match kernel {
-            KERN::N2B_FINAL_7_OR_8(stages) => {
+            KERN::N2B_FINAL_7_WARP(stages) => {
                 stage += stages;
                 launch(
-                    total_blocks_smem,
-                    nthreads_smem,
-                    smem_bytes,
+                    (n / (4 * 128), num_chunks).into(),
+                    128,
+                    0,
                     stream,
-                    n2b_final_7_or_8_stages as *const c_void,
+                    n2b_final_7_stages_warp as *const c_void,
                     inputs_ptr,
                     outputs_ptr,
                     stride_between_input_arrays,
@@ -383,19 +420,19 @@ pub fn batch_ntt_internal(
                     *stages,
                     log_n,
                     inverse,
-                    blocks_per_ntt_smem,
+                    num_ntts,
                     log_extension_degree,
                     coset_index,
                 )
             }
-            KERN::N2B_FINAL_9_TO_12(stages) => {
+            KERN::N2B_FINAL_8_WARP(stages) => {
                 stage += stages;
                 launch(
-                    total_blocks_smem,
-                    nthreads_smem,
-                    smem_bytes,
+                    (n / (4 * 256), num_chunks).into(),
+                    128,
+                    0,
                     stream,
-                    n2b_final_9_to_12_stages as *const c_void,
+                    n2b_final_8_stages_warp as *const c_void,
                     inputs_ptr,
                     outputs_ptr,
                     stride_between_input_arrays,
@@ -404,19 +441,19 @@ pub fn batch_ntt_internal(
                     *stages,
                     log_n,
                     inverse,
-                    blocks_per_ntt_smem,
+                    num_ntts,
                     log_extension_degree,
                     coset_index,
                 )
             }
-            KERN::N2B_NONFINAL_7_OR_8(stages) => {
+            KERN::N2B_FINAL_9_TO_12_BLOCK(stages) => {
                 stage += stages;
                 launch(
-                    total_blocks_smem,
-                    nthreads_smem,
-                    smem_bytes,
+                    (n / 4096, num_chunks).into(),
+                    512,
+                    0,
                     stream,
-                    n2b_nonfinal_7_or_8_stages as *const c_void,
+                    n2b_final_9_to_12_stages_block as *const c_void,
                     inputs_ptr,
                     outputs_ptr,
                     stride_between_input_arrays,
@@ -425,19 +462,19 @@ pub fn batch_ntt_internal(
                     *stages,
                     log_n,
                     inverse,
-                    blocks_per_ntt_smem,
+                    num_ntts,
                     log_extension_degree,
                     coset_index,
                 )
             }
-            KERN::B2N_INITIAL_7_OR_8(stages) => {
+            KERN::N2B_NONFINAL_7_OR_8_BLOCK(stages) => {
                 stage += stages;
                 launch(
-                    total_blocks_smem,
-                    nthreads_smem,
-                    smem_bytes,
+                    (n / 4096, num_chunks).into(),
+                    512,
+                    0,
                     stream,
-                    b2n_initial_7_or_8_stages as *const c_void,
+                    n2b_nonfinal_7_or_8_stages_block as *const c_void,
                     inputs_ptr,
                     outputs_ptr,
                     stride_between_input_arrays,
@@ -446,19 +483,19 @@ pub fn batch_ntt_internal(
                     *stages,
                     log_n,
                     inverse,
-                    blocks_per_ntt_smem,
+                    num_ntts,
                     log_extension_degree,
                     coset_index,
                 )
             }
-            KERN::B2N_INITIAL_9_TO_12(stages) => {
+            KERN::B2N_INITIAL_7_WARP(stages) => {
                 stage += stages;
                 launch(
-                    total_blocks_smem,
-                    nthreads_smem,
-                    smem_bytes,
+                    (n / (4 * 128), num_chunks).into(),
+                    128,
+                    0,
                     stream,
-                    b2n_initial_9_to_12_stages as *const c_void,
+                    b2n_initial_7_stages_warp as *const c_void,
                     inputs_ptr,
                     outputs_ptr,
                     stride_between_input_arrays,
@@ -467,19 +504,19 @@ pub fn batch_ntt_internal(
                     *stages,
                     log_n,
                     inverse,
-                    blocks_per_ntt_smem,
+                    num_ntts,
                     log_extension_degree,
                     coset_index,
                 )
             }
-            KERN::B2N_NONINITIAL_7_OR_8(stages) => {
+            KERN::B2N_INITIAL_8_WARP(stages) => {
                 stage += stages;
                 launch(
-                    total_blocks_smem,
-                    nthreads_smem,
-                    smem_bytes,
+                    (n / (4 * 256), num_chunks).into(),
+                    128,
+                    0,
                     stream,
-                    b2n_noninitial_7_or_8_stages as *const c_void,
+                    b2n_initial_8_stages_warp as *const c_void,
                     inputs_ptr,
                     outputs_ptr,
                     stride_between_input_arrays,
@@ -488,7 +525,49 @@ pub fn batch_ntt_internal(
                     *stages,
                     log_n,
                     inverse,
-                    blocks_per_ntt_smem,
+                    num_ntts,
+                    log_extension_degree,
+                    coset_index,
+                )
+            }
+            KERN::B2N_INITIAL_9_TO_12_BLOCK(stages) => {
+                stage += stages;
+                launch(
+                    (n / 4096, num_chunks).into(),
+                    512,
+                    0,
+                    stream,
+                    b2n_initial_9_to_12_stages_block as *const c_void,
+                    inputs_ptr,
+                    outputs_ptr,
+                    stride_between_input_arrays,
+                    stride_between_output_arrays,
+                    start_stage,
+                    *stages,
+                    log_n,
+                    inverse,
+                    num_ntts,
+                    log_extension_degree,
+                    coset_index,
+                )
+            }
+            KERN::B2N_NONINITIAL_7_OR_8_BLOCK(stages) => {
+                stage += stages;
+                launch(
+                    (n / 4096, num_chunks).into(),
+                    512,
+                    0,
+                    stream,
+                    b2n_noninitial_7_or_8_stages_block as *const c_void,
+                    inputs_ptr,
+                    outputs_ptr,
+                    stride_between_input_arrays,
+                    stride_between_output_arrays,
+                    start_stage,
+                    *stages,
+                    log_n,
+                    inverse,
+                    num_ntts,
                     log_extension_degree,
                     coset_index,
                 )
@@ -696,7 +775,7 @@ mod tests {
             memory_copy_async(&mut outputs_n2b_out_of_place_host, &outputs_device, &stream)
                 .unwrap();
 
-            // // Bitrev to nonbitrev, in-place
+            // Bitrev to nonbitrev, in-place
             memory_copy_async(&mut inputs_device, &inputs_bitrev_host, &stream).unwrap();
             batch_ntt_in_place(
                 &mut inputs_device,
@@ -825,7 +904,7 @@ mod tests {
     #[test]
     #[serial]
     fn correctness_batch_ntt_fwd() {
-        correctness(1..17, false, 0, 0, 3);
+        correctness(1..17, false, 0, 0, 2 * NTTS_PER_BLOCK + 3);
     }
 
     #[test]
