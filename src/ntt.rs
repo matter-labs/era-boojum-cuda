@@ -303,7 +303,7 @@ fn launch(
         );
         cudaLaunchKernel(
             kernel,
-            nblocks.into(),
+            nblocks,
             nthreads.into(),
             args.as_mut_ptr(),
             smem_bytes,
