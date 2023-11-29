@@ -984,7 +984,7 @@ mod tests {
                 });
             if !results_next.is_empty() {
                 let indexes_next = indexes.iter().map(|&x| x >> 1).collect_vec();
-                verify_merkle_path(&indexes_next, &values_next, &results_next);
+                verify_merkle_path(&indexes_next, values_next, results_next);
             }
         }
         verify_merkle_path(&indexes_host, &values_host, &results_host);
