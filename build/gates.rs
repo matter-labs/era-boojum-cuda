@@ -195,8 +195,7 @@ fn generate_rust(descriptions: &[Description]) {
         h.push_str(format!("(\"{name}\", {id}),").as_str());
         new_line(h);
         let kernel_name = format!("evaluate_{name}_kernel");
-        indent(b, 1);
-        b.push_str(format!("kernel_binding!({kernel_name});").as_str());
+        b.push_str(format!("gate_eval_kernel!({kernel_name});").as_str());
         new_line(b);
         new_line(m);
         indent(m, 2);

@@ -1,8 +1,7 @@
-use cudart::memory::DeviceAllocation;
-use cudart::slice::{DeviceSlice, DeviceVariable};
-
 use crate::extension_field::{ExtensionField, VectorizedExtensionField};
 use crate::BaseField;
+use cudart::memory::DeviceAllocation;
+use cudart::slice::{DeviceSlice, DeviceVariable};
 
 pub trait DeviceRepr: Sized {
     type Type: Sized;
@@ -28,15 +27,25 @@ impl DeviceRepr for VectorizedExtensionField {
     type Type = BaseField;
 }
 
-pub type U32DeviceType = <u32 as DeviceRepr>::Type;
+pub trait Vectorized: DeviceRepr {
+    type Type: DeviceRepr;
+}
 
-pub type U64DeviceType = <u64 as DeviceRepr>::Type;
+impl Vectorized for u32 {
+    type Type = Self;
+}
 
-pub type BaseFieldDeviceType = <BaseField as DeviceRepr>::Type;
+impl Vectorized for u64 {
+    type Type = Self;
+}
 
-pub type ExtensionFieldDeviceType = <ExtensionField as DeviceRepr>::Type;
+impl Vectorized for BaseField {
+    type Type = Self;
+}
 
-pub type VectorizedExtensionFieldDeviceType = <VectorizedExtensionField as DeviceRepr>::Type;
+impl Vectorized for ExtensionField {
+    type Type = VectorizedExtensionField;
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

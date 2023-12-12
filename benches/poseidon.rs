@@ -171,7 +171,7 @@ fn poseidon2_cooperative_nodes(c: &mut Criterion<CudaMeasurement>) {
     );
 }
 
-fn merkle_tree<PoseidonVariant: PoseidonRunnable>(
+fn merkle_tree<PoseidonVariant: PoseidonImpl>(
     c: &mut Criterion<CudaMeasurement>,
     group_name: String,
 ) {

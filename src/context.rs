@@ -1,15 +1,13 @@
-use std::ffi::c_void;
-use std::mem::size_of;
-
 use boojum::cs::implementations::utils::domain_generator_for_size;
 use boojum::fft::{bitreverse_enumeration_inplace, distribute_powers};
 use boojum::field::goldilocks::GoldilocksField;
 use boojum::field::{Field, PrimeField};
-
 use cudart::memory::{memory_copy, DeviceAllocation};
 use cudart::result::{CudaResult, CudaResultWrap};
 use cudart::slice::DeviceSlice;
 use cudart_sys::{cudaMemcpyToSymbol, CudaMemoryCopyKind};
+use std::mem::size_of;
+use std::os::raw::c_void;
 
 pub const OMEGA_LOG_ORDER: u32 = 24;
 
