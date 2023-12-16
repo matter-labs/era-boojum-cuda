@@ -1,12 +1,13 @@
 use boojum::field::goldilocks::{GoldilocksExt2, GoldilocksField};
-
-use cudart::execution::{KernelFourArgs, KernelLaunch};
+use cudart::cuda_kernel_declaration;
+use cudart::cuda_kernel_signature_arguments_and_function;
+use cudart::execution::{CudaLaunchConfig, KernelFunction};
+use cudart::paste::paste;
 use cudart::result::CudaResult;
 use cudart::stream::CudaStream;
 
 use crate::device_structures::{
-    DeviceMatrixChunkImpl, DeviceMatrixChunkMutImpl, DeviceRepr, ExtensionFieldDeviceType,
-    MutPtrAndStride, PtrAndStride, VectorizedExtensionFieldDeviceType,
+    DeviceMatrixChunkImpl, DeviceMatrixChunkMutImpl, DeviceRepr, MutPtrAndStride, PtrAndStride,
 };
 use crate::utils::{get_grid_block_dims_for_threads_count, WARP_SIZE};
 
@@ -16,95 +17,84 @@ pub type ExtensionField = boojum::field::ExtensionField<GoldilocksField, 2, Gold
 #[derive(Clone, Copy, Debug)]
 pub struct VectorizedExtensionField([GoldilocksField; 2]);
 
-extern "C" {
-    fn vectorized_to_tuples_kernel(
-        src: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        dst: MutPtrAndStride<ExtensionFieldDeviceType>,
-        rows: u32,
-        cols: u32,
-    );
+cuda_kernel_signature_arguments_and_function!(
+    Convert<T: Convert>,
+    src: PtrAndStride<<T as DeviceRepr>::Type>,
+    dst: MutPtrAndStride<<<T as Convert>::Target as DeviceRepr>::Type>,
+    rows: u32,
+    cols: u32,
+);
 
-    fn tuples_to_vectorized_kernel(
-        src: PtrAndStride<ExtensionFieldDeviceType>,
-        dst: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
-        rows: u32,
-        cols: u32,
-    );
+macro_rules! convert_kernel {
+    ($op:ty, $type:ty, $target:ty) => {
+        paste! {
+            cuda_kernel_declaration!(
+                [<$op _kernel>](
+                    src: PtrAndStride<<$type as DeviceRepr>::Type>,
+                    dst: MutPtrAndStride<<$target as DeviceRepr>::Type>,
+                    rows: u32,
+                    cols: u32,
+                )
+            );
+        }
+    };
 }
 
-pub trait ConvertTarget: DeviceRepr {
+pub trait Convert: DeviceRepr {
     type Target: DeviceRepr;
+    const CONVERT_FUNCTION: ConvertSignature<Self>;
 }
 
-type ConvertKernel<T> = KernelFourArgs<
-    PtrAndStride<<T as DeviceRepr>::Type>,
-    MutPtrAndStride<<<T as ConvertTarget>::Target as DeviceRepr>::Type>,
-    u32,
-    u32,
->;
-
-pub trait Convert: ConvertTarget {
-    fn get_kernel() -> ConvertKernel<Self>;
-
-    fn launch_kernel<S, D>(src: &S, dst: &mut D, stream: &CudaStream) -> CudaResult<()>
-    where
-        S: DeviceMatrixChunkImpl<Self> + ?Sized,
-        D: DeviceMatrixChunkMutImpl<Self::Target> + ?Sized,
-    {
-        assert_eq!(src.rows(), dst.rows());
-        assert!(src.rows() <= u32::MAX as usize);
-        let rows = src.rows() as u32;
-        assert_eq!(src.cols(), dst.cols());
-        assert!(src.cols() <= u32::MAX as usize);
-        let cols = src.cols() as u32;
-        let src = src.as_ptr_and_stride();
-        let dst = dst.as_mut_ptr_and_stride();
-        let (grid_dim, block_dim) =
-            get_grid_block_dims_for_threads_count(WARP_SIZE * 4, rows * cols);
-        let args = (&src, &dst, &rows, &cols);
-        let kernel = Self::get_kernel();
-        unsafe { kernel.launch(grid_dim, block_dim, args, 0, stream) }
-    }
+macro_rules! convert_impl {
+    ($op:ty, $type:ty, $target:ty) => {
+        paste! {
+            convert_kernel!($op, $type, $target);
+            impl Convert for $type {
+                type Target = $target;
+                const CONVERT_FUNCTION: ConvertSignature<Self> = [<$op _kernel>];
+            }
+        }
+    };
 }
 
-impl ConvertTarget for ExtensionField {
-    type Target = VectorizedExtensionField;
+pub fn convert<T: Convert>(
+    src: &(impl DeviceMatrixChunkImpl<T> + ?Sized),
+    dst: &mut (impl DeviceMatrixChunkMutImpl<T::Target> + ?Sized),
+    stream: &CudaStream,
+) -> CudaResult<()> {
+    assert_eq!(src.rows(), dst.rows());
+    assert!(src.rows() <= u32::MAX as usize);
+    let rows = src.rows() as u32;
+    assert_eq!(src.cols(), dst.cols());
+    assert!(src.cols() <= u32::MAX as usize);
+    let cols = src.cols() as u32;
+    let src = src.as_ptr_and_stride();
+    let dst = dst.as_mut_ptr_and_stride();
+    let (grid_dim, block_dim) = get_grid_block_dims_for_threads_count(WARP_SIZE * 4, rows * cols);
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = ConvertArguments::<T>::new(src, dst, rows, cols);
+    ConvertFunction::<T>(T::CONVERT_FUNCTION).launch(&config, &args)
 }
 
-impl Convert for ExtensionField {
-    fn get_kernel() -> ConvertKernel<Self> {
-        tuples_to_vectorized_kernel
-    }
-}
+convert_impl!(
+    tuples_to_vectorized,
+    ExtensionField,
+    VectorizedExtensionField
+);
 
-impl ConvertTarget for VectorizedExtensionField {
-    type Target = ExtensionField;
-}
-
-impl Convert for VectorizedExtensionField {
-    fn get_kernel() -> ConvertKernel<Self> {
-        vectorized_to_tuples_kernel
-    }
-}
-
-pub fn convert<T, S, D>(src: &S, dst: &mut D, stream: &CudaStream) -> CudaResult<()>
-where
-    T: Convert,
-    S: DeviceMatrixChunkImpl<T> + ?Sized,
-    D: DeviceMatrixChunkMutImpl<T::Target> + ?Sized,
-{
-    T::launch_kernel(src, dst, stream)
-}
+convert_impl!(
+    vectorized_to_tuples,
+    VectorizedExtensionField,
+    ExtensionField
+);
 
 #[cfg(test)]
 pub(crate) mod test_helpers {
+    use super::*;
+    use boojum::field::goldilocks::GoldilocksField;
     use std::iter::{Map, Zip};
     use std::slice;
     use std::slice::Iter;
-
-    use boojum::field::goldilocks::GoldilocksField;
-
-    use super::*;
 
     type VectorizedExtensionFieldIteratorInner<'a> = Map<
         Zip<Iter<'a, GoldilocksField>, Iter<'a, GoldilocksField>>,
@@ -174,21 +164,17 @@ pub(crate) mod test_helpers {
 
 #[cfg(test)]
 mod tests {
-    use std::{mem, vec};
-
+    use super::test_helpers::*;
+    use crate::device_structures::{DeviceMatrix, DeviceMatrixMut};
+    use crate::extension_field::{ExtensionField, VectorizedExtensionField};
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::field::Field;
+    use cudart::memory::{memory_copy_async, DeviceAllocation};
+    use cudart::stream::CudaStream;
     use itertools::Itertools;
     use rand::distributions::Uniform;
     use rand::prelude::*;
-
-    use cudart::memory::{memory_copy_async, DeviceAllocation};
-    use cudart::stream::CudaStream;
-
-    use crate::device_structures::{DeviceMatrix, DeviceMatrixMut};
-    use crate::extension_field::{ExtensionField, VectorizedExtensionField};
-
-    use super::test_helpers::*;
+    use std::{mem, vec};
 
     #[test]
     fn extension_field_size() {

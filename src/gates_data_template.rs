@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -9,9 +8,7 @@ lazy_static! {
     .copied()
     .collect();
 }
-
-extern "C" {%BINDINGS%}
-
+%BINDINGS%
 fn get_gate_data(id: u32) -> GateData {
     match id {%MAPPINGS%
         _ => panic!("unknown gate id {id}"),

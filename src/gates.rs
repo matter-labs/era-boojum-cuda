@@ -1,22 +1,21 @@
-use std::ffi::c_void;
-use std::mem::size_of;
-
-use boojum::cs::traits::evaluator::GateConstraintEvaluator;
-use boojum::cs::traits::gate::Gate;
-use boojum::field::goldilocks::GoldilocksField;
-use boojum::gpu_synthesizer::get_evaluator_name;
-
-use cudart::kernel_args;
-use cudart::result::{CudaResult, CudaResultWrap};
-use cudart::stream::CudaStream;
-use cudart_sys::cudaLaunchKernel;
-
 use crate::device_structures::{
-    BaseFieldDeviceType, DeviceMatrixChunkImpl, DeviceMatrixChunkMutImpl, DeviceVectorImpl,
-    MutPtrAndStride, PtrAndStride, VectorizedExtensionFieldDeviceType,
+    DeviceMatrixChunkImpl, DeviceMatrixChunkMutImpl, DeviceRepr, DeviceVectorImpl, MutPtrAndStride,
+    PtrAndStride,
 };
 use crate::extension_field::VectorizedExtensionField;
 use crate::utils::{get_grid_block_dims_for_threads_count, WARP_SIZE};
+use crate::BaseField;
+use boojum::cs::traits::evaluator::GateConstraintEvaluator;
+use boojum::cs::traits::gate::Gate;
+use boojum::gpu_synthesizer::get_evaluator_name;
+use cudart::cuda_kernel;
+use cudart::execution::{CudaLaunchConfig, KernelFunction};
+use cudart::result::CudaResult;
+use cudart::stream::CudaStream;
+use std::mem::size_of;
+
+type BF = BaseField;
+type EF = VectorizedExtensionField;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -33,30 +32,15 @@ pub struct GateEvaluationParams {
     pub repetition_constants_offset: u32,
 }
 
-macro_rules! kernel_binding {
-    ($function_name:ident) => {
-        fn $function_name(
-            params: GateEvaluationParams,
-            variable_polys: *const GoldilocksField,
-            witness_polys: *const GoldilocksField,
-            constant_polys: *const GoldilocksField,
-            challenges: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-            quotient_polys: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
-            challenges_count: u32,
-            challenges_power_offset: u32,
-            rows_count: u32,
-            inputs_stride: u32,
-        );
-    };
-}
-
-type Kernel = unsafe extern "C" fn(
+cuda_kernel!(
+    GateEval,
+    gate_eval_kernel,
     params: GateEvaluationParams,
-    variable_polys: *const BaseFieldDeviceType,
-    witness_polys: *const BaseFieldDeviceType,
-    constant_polys: *const BaseFieldDeviceType,
-    challenges: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-    quotient_polys: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
+    variable_polys: *const <BF as DeviceRepr>::Type,
+    witness_polys: *const <BF as DeviceRepr>::Type,
+    constant_polys: *const <BF as DeviceRepr>::Type,
+    challenges: PtrAndStride<<EF as DeviceRepr>::Type>,
+    quotient_polys: MutPtrAndStride<<EF as DeviceRepr>::Type>,
     challenges_count: u32,
     challenges_power_offset: u32,
     rows_count: u32,
@@ -70,7 +54,7 @@ struct GateData {
     max_variable_index: Option<u32>,
     max_witness_index: Option<u32>,
     max_constant_index: Option<u32>,
-    kernel: Kernel,
+    kernel: GateEvalSignature,
 }
 
 include!("gates_data.rs");
@@ -79,14 +63,12 @@ pub fn find_gate_id_by_name(name: &str) -> Option<u32> {
     HASH_MAP.get(name).copied()
 }
 
-pub fn find_gate_id_for_evaluator<E: GateConstraintEvaluator<GoldilocksField>>(
-    evaluator: &E,
-) -> Option<u32> {
+pub fn find_gate_id_for_evaluator<E: GateConstraintEvaluator<BF>>(evaluator: &E) -> Option<u32> {
     let name = get_evaluator_name(evaluator);
     find_gate_id_by_name(&name)
 }
 
-pub fn find_gate_id_for_evaluator_type<E: GateConstraintEvaluator<GoldilocksField>>(
+pub fn find_gate_id_for_evaluator_type<E: GateConstraintEvaluator<BF>>(
     params: E::UniqueParameterizationParams,
 ) -> Option<u32> {
     let evaluator = E::new_from_parameters(params);
@@ -94,10 +76,8 @@ pub fn find_gate_id_for_evaluator_type<E: GateConstraintEvaluator<GoldilocksFiel
     find_gate_id_by_name(&name)
 }
 
-pub fn find_gate_id_for_gate_type<G: Gate<GoldilocksField>>(
-    params: <<G as Gate<GoldilocksField>>::Evaluator as GateConstraintEvaluator<
-        GoldilocksField,
-    >>::UniqueParameterizationParams,
+pub fn find_gate_id_for_gate_type<G: Gate<BF>>(
+    params: <<G as Gate<BF>>::Evaluator as GateConstraintEvaluator<BF>>::UniqueParameterizationParams,
 ) -> Option<u32> {
     find_gate_id_for_evaluator_type::<G::Evaluator>(params)
 }
@@ -125,9 +105,9 @@ pub fn evaluate_gate<I, C, Q>(
     stream: &CudaStream,
 ) -> CudaResult<u32>
 where
-    I: DeviceMatrixChunkImpl<GoldilocksField> + ?Sized,
-    C: DeviceVectorImpl<VectorizedExtensionField> + ?Sized,
-    Q: DeviceMatrixChunkMutImpl<VectorizedExtensionField> + ?Sized,
+    I: DeviceMatrixChunkImpl<BF> + ?Sized,
+    C: DeviceVectorImpl<EF> + ?Sized,
+    Q: DeviceMatrixChunkMutImpl<EF> + ?Sized,
 {
     let inputs_stride = variable_polys.stride();
     assert_eq!(witness_polys.stride(), inputs_stride);
@@ -179,38 +159,36 @@ where
     assert!(rows_count <= u32::MAX as usize);
     let rows_count = rows_count as u32;
     assert!(challenges_count <= rows_count);
-    unsafe {
-        let variable_polys = variable_polys.as_ptr();
-        let witness_polys = witness_polys.as_ptr();
-        let constant_polys = constant_polys.as_ptr();
-        let challenges = challenges.as_ptr_and_stride();
-        let quotient_polys = quotient_polys.as_mut_ptr_and_stride();
-        let (grid_dim, block_dim) =
-            get_grid_block_dims_for_threads_count(WARP_SIZE * 4, rows_count);
-        let mut args = kernel_args!(
-            params,
-            &variable_polys,
-            &witness_polys,
-            &constant_polys,
-            &challenges,
-            &quotient_polys,
-            &challenges_count,
-            &challenges_power_offset,
-            &rows_count,
-            &inputs_stride,
-        );
-        let shared_size =
-            size_of::<VectorizedExtensionField>() * (challenges_count * (2 + block_dim.x)) as usize;
-        cudaLaunchKernel(
-            kernel as *const c_void,
-            grid_dim,
-            block_dim,
-            args.as_mut_ptr(),
-            shared_size,
-            stream.into(),
-        )
-        .wrap_value(challenges_power_offset + writes_count * params.repetitions_count)
-    }
+    assert!(inputs_stride <= u32::MAX as usize);
+    let inputs_stride = inputs_stride as u32;
+    let variable_polys = variable_polys.as_ptr();
+    let witness_polys = witness_polys.as_ptr();
+    let constant_polys = constant_polys.as_ptr();
+    let challenges = challenges.as_ptr_and_stride();
+    let quotient_polys = quotient_polys.as_mut_ptr_and_stride();
+    let (grid_dim, block_dim) = get_grid_block_dims_for_threads_count(WARP_SIZE * 4, rows_count);
+    let shared_size = size_of::<EF>() * (challenges_count * (2 + block_dim.x)) as usize;
+    let config = CudaLaunchConfig::builder()
+        .grid_dim(grid_dim)
+        .block_dim(block_dim)
+        .dynamic_smem_bytes(shared_size)
+        .stream(stream)
+        .build();
+    let args = GateEvalArguments::new(
+        *params,
+        variable_polys,
+        witness_polys,
+        constant_polys,
+        challenges,
+        quotient_polys,
+        challenges_count,
+        challenges_power_offset,
+        rows_count,
+        inputs_stride,
+    );
+    GateEvalFunction(kernel)
+        .launch(&config, &args)
+        .map(|_| challenges_power_offset + writes_count * params.repetitions_count)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -225,9 +203,9 @@ pub fn evaluate_gates<I, C, Q>(
     stream: &CudaStream,
 ) -> CudaResult<u32>
 where
-    I: DeviceMatrixChunkImpl<GoldilocksField> + ?Sized,
-    C: DeviceVectorImpl<VectorizedExtensionField> + ?Sized,
-    Q: DeviceMatrixChunkMutImpl<VectorizedExtensionField> + ?Sized,
+    I: DeviceMatrixChunkImpl<BF> + ?Sized,
+    C: DeviceVectorImpl<EF> + ?Sized,
+    Q: DeviceMatrixChunkMutImpl<EF> + ?Sized,
 {
     let mut challenges_power_offset = challenges_power_offset;
     for params in gates_params {
@@ -247,6 +225,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::device_structures::{DeviceMatrix, DeviceMatrixMut};
+    use crate::extension_field::ExtensionField;
+    use crate::ops_simple::set_to_zero;
     use boojum::algebraic_props::poseidon2_parameters::{
         Poseidon2GoldilocksExternalMatrix, Poseidon2GoldilocksInnerMatrix,
     };
@@ -257,27 +239,20 @@ mod tests {
     };
     use boojum::cs::traits::gate::Gate;
     use boojum::cs::CSGeometry;
-    use boojum::field::goldilocks::{GoldilocksExt2, GoldilocksField};
+    use boojum::field::goldilocks::GoldilocksExt2;
     use boojum::field::Field;
     use boojum::gpu_synthesizer::{TestDestination, TestSource};
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
-    use rand::prelude::*;
-
     use cudart::memory::{memory_copy_async, DeviceAllocation};
     use cudart::slice::DeviceSlice;
+    use rand::prelude::*;
 
-    use crate::device_structures::{DeviceMatrix, DeviceMatrixMut};
-    use crate::extension_field::ExtensionField;
-    use crate::ops_simple::set_to_zero;
-
-    use super::*;
-
-    type F = GoldilocksField;
     type EF = ExtensionField;
+    type VF = VectorizedExtensionField;
 
     fn copy_vectors_async(
-        dst: &mut DeviceSlice<F>,
-        src: &Vec<Vec<F>>,
+        dst: &mut DeviceSlice<BF>,
+        src: &Vec<Vec<BF>>,
         stream: &CudaStream,
         len: usize,
     ) {
@@ -290,10 +265,8 @@ mod tests {
         }
     }
 
-    fn test_gate<G: Gate<F>>(
-        params: <<G as Gate<F>>::Evaluator as GateConstraintEvaluator<
-            F,
-        >>::UniqueParameterizationParams,
+    fn test_gate<G: Gate<BF>>(
+        params: <<G as Gate<BF>>::Evaluator as GateConstraintEvaluator<BF>>::UniqueParameterizationParams,
     ) {
         const VARIABLES_COUNT: usize = 144;
         const WITNESSES_COUNT: usize = 16;
@@ -309,7 +282,7 @@ mod tests {
             num_constant_columns: CONSTANTS_COUNT - SELECTORS_COUNT,
             max_allowed_constraint_degree: <usize>::MAX,
         };
-        let mut source = TestSource::<F>::random_source(
+        let mut source = TestSource::<BF>::random_source(
             VARIABLES_COUNT,
             WITNESSES_COUNT,
             CONSTANTS_COUNT,
@@ -319,22 +292,22 @@ mod tests {
             .constants
             .iter_mut()
             .take(SELECTORS_COUNT)
-            .for_each(|v| v.fill(F::ZERO));
+            .for_each(|v| v.fill(BF::ZERO));
         let evaluator = G::Evaluator::new_from_parameters(params);
         let ctx = &mut ();
         let gate_id = find_gate_id_for_evaluator(&evaluator).unwrap();
         let num_repetitions = G::Evaluator::num_repetitions_in_geometry(&evaluator, &geometry);
         let per_chunk_offset =
             G::Evaluator::per_chunk_offset_for_repetition_over_general_purpose_columns(&evaluator);
-        let global_constants = evaluator.create_global_constants::<F>(ctx);
-        let evaluator = GenericRowwiseEvaluator::<F, F, _> {
+        let global_constants = evaluator.create_global_constants::<BF>(ctx);
+        let evaluator = GenericRowwiseEvaluator::<BF, BF, _> {
             evaluator,
             global_constants,
             num_repetitions,
             per_chunk_offset,
         };
         let num_terms = G::Evaluator::num_quotient_terms();
-        let mut destination = TestDestination::<F>::new(TRACE_LENGTH, num_terms * num_repetitions);
+        let mut destination = TestDestination::<BF>::new(TRACE_LENGTH, num_terms * num_repetitions);
         for _ in 0..TRACE_LENGTH {
             evaluator.evaluate_over_general_purpose_columns(
                 &mut source,
@@ -344,13 +317,13 @@ mod tests {
             );
         }
         let stream = CudaStream::default();
-        let mut trace_device = DeviceAllocation::<F>::alloc(
+        let mut trace_device = DeviceAllocation::<BF>::alloc(
             (VARIABLES_COUNT + WITNESSES_COUNT + CONSTANTS_COUNT) << LOG_TRACE_LENGTH,
         )
         .unwrap();
-        let mut challenges_device = DeviceAllocation::<F>::alloc(CHALLENGES_COUNT << 1).unwrap();
+        let mut challenges_device = DeviceAllocation::<BF>::alloc(CHALLENGES_COUNT << 1).unwrap();
         let mut quotient_polys_device =
-            DeviceAllocation::<F>::alloc(CHALLENGES_COUNT << (LOG_TRACE_LENGTH + 1)).unwrap();
+            DeviceAllocation::<BF>::alloc(CHALLENGES_COUNT << (LOG_TRACE_LENGTH + 1)).unwrap();
         const WITNESSES_OFFSET: usize = VARIABLES_COUNT << LOG_TRACE_LENGTH;
         const CONSTANTS_OFFSET: usize = WITNESSES_OFFSET + (WITNESSES_COUNT << LOG_TRACE_LENGTH);
         copy_vectors_async(
@@ -372,11 +345,11 @@ mod tests {
             TRACE_LENGTH,
         );
         let challenges_host = (0..CHALLENGES_COUNT * 2)
-            .map(|_| F::from_nonreduced_u64(thread_rng().gen()))
+            .map(|_| BF::from_nonreduced_u64(thread_rng().gen()))
             .collect::<Vec<_>>();
         memory_copy_async(&mut challenges_device, &challenges_host, &stream).unwrap();
         set_to_zero(&mut quotient_polys_device, &stream).unwrap();
-        let mut quotient_polys_host = vec![F::ZERO; CHALLENGES_COUNT << (LOG_TRACE_LENGTH + 1)];
+        let mut quotient_polys_host = vec![BF::ZERO; CHALLENGES_COUNT << (LOG_TRACE_LENGTH + 1)];
         let params = GateEvaluationParams {
             id: gate_id,
             selector_mask: 0,
@@ -395,9 +368,9 @@ mod tests {
             TRACE_LENGTH,
         );
         let constant_polys = DeviceMatrix::new(&trace_device[CONSTANTS_OFFSET..], TRACE_LENGTH);
-        let challenges = unsafe { challenges_device.transmute::<VectorizedExtensionField>() };
+        let challenges = unsafe { challenges_device.transmute::<VF>() };
         let mut quotient_polys = DeviceMatrixMut::new(
-            unsafe { quotient_polys_device.transmute_mut::<VectorizedExtensionField>() },
+            unsafe { quotient_polys_device.transmute_mut::<VF>() },
             TRACE_LENGTH,
         );
         let challenges_power_offset = evaluate_gate(
@@ -466,7 +439,7 @@ mod tests {
 
     #[test]
     fn constants_allocator() {
-        test_gate::<ConstantsAllocatorGate<F>>(());
+        test_gate::<ConstantsAllocatorGate<BF>>(());
     }
 
     #[test]
@@ -476,22 +449,22 @@ mod tests {
 
     #[test]
     fn fma_in_base_field_without_constant() {
-        test_gate::<FmaGateInBaseFieldWithoutConstant<F>>(());
+        test_gate::<FmaGateInBaseFieldWithoutConstant<BF>>(());
     }
 
     #[test]
     fn fma_in_extension_field_without_constant() {
-        test_gate::<FmaGateInExtensionWithoutConstant<F, GoldilocksExt2>>(());
+        test_gate::<FmaGateInExtensionWithoutConstant<BF, GoldilocksExt2>>(());
     }
 
     #[test]
     fn matrix_multiplication_poseidon_2_external() {
-        test_gate::<MatrixMultiplicationGate<F, 12, Poseidon2GoldilocksExternalMatrix>>(());
+        test_gate::<MatrixMultiplicationGate<BF, 12, Poseidon2GoldilocksExternalMatrix>>(());
     }
 
     #[test]
     fn matrix_multiplication_poseidon_2_inner() {
-        test_gate::<MatrixMultiplicationGate<F, 12, Poseidon2GoldilocksInnerMatrix>>(());
+        test_gate::<MatrixMultiplicationGate<BF, 12, Poseidon2GoldilocksInnerMatrix>>(());
     }
 
     #[test]
@@ -501,7 +474,7 @@ mod tests {
 
     #[test]
     fn poseidon_2_130_0() {
-        test_gate::<Poseidon2FlattenedGate<F, 8, 12, 4, Poseidon2Goldilocks>>((130, 0));
+        test_gate::<Poseidon2FlattenedGate<BF, 8, 12, 4, Poseidon2Goldilocks>>((130, 0));
     }
 
     #[test]
@@ -511,12 +484,12 @@ mod tests {
 
     #[test]
     fn reduction_by_powers_4() {
-        test_gate::<ReductionByPowersGate<F, 4>>(());
+        test_gate::<ReductionByPowersGate<BF, 4>>(());
     }
 
     #[test]
     fn reduction_4() {
-        test_gate::<ReductionGate<F, 4>>(());
+        test_gate::<ReductionGate<BF, 4>>(());
     }
 
     #[test]
@@ -526,7 +499,7 @@ mod tests {
 
     #[test]
     fn simple_nonlinearity_7() {
-        test_gate::<SimpleNonlinearityGate<F, 7>>(());
+        test_gate::<SimpleNonlinearityGate<BF, 7>>(());
     }
 
     #[test]

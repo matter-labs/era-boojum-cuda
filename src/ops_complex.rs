@@ -1,20 +1,6 @@
-use boojum::field::goldilocks::GoldilocksField;
-use itertools::max;
-
-use cudart::execution::{
-    KernelFiveArgs, KernelFourArgs, KernelLaunch, KernelSevenArgs, KernelSixArgs, KernelThreeArgs,
-};
-use cudart::kernel_args;
-use cudart::memory::memory_copy_async;
-use cudart::result::{CudaResult, CudaResultWrap};
-use cudart::slice::{DeviceSlice, DeviceVariable};
-use cudart::stream::CudaStream;
-use cudart_sys::{cudaLaunchKernel, dim3};
-
 use crate::device_structures::{
-    BaseFieldDeviceType, DeviceMatrixChunkImpl, DeviceMatrixChunkMutImpl, DeviceMatrixImpl,
-    DeviceMatrixMutImpl, DeviceRepr, DeviceVectorImpl, DeviceVectorMutImpl,
-    ExtensionFieldDeviceType, MutPtrAndStride, PtrAndStride, VectorizedExtensionFieldDeviceType,
+    DeviceMatrixChunkImpl, DeviceMatrixChunkMutImpl, DeviceMatrixImpl, DeviceMatrixMutImpl,
+    DeviceRepr, DeviceVectorImpl, DeviceVectorMutImpl, MutPtrAndStride, PtrAndStride,
 };
 use crate::extension_field::{ExtensionField, VectorizedExtensionField};
 use crate::ops_cub::device_radix_sort::{get_sort_pairs_temp_storage_bytes, sort_pairs};
@@ -23,343 +9,108 @@ use crate::ops_cub::device_scan::{get_scan_temp_storage_bytes, scan_in_place, Sc
 use crate::ops_simple::{set_by_val, set_to_zero};
 use crate::utils::{get_grid_block_dims_for_threads_count, WARP_SIZE};
 use crate::BaseField;
+use cudart::execution::{CudaLaunchConfig, Dim3, KernelFunction};
+use cudart::memory::memory_copy_async;
+use cudart::paste::paste;
+use cudart::result::CudaResult;
+use cudart::slice::{DeviceSlice, DeviceVariable};
+use cudart::stream::CudaStream;
+use cudart::{cuda_kernel, cuda_kernel_declaration, cuda_kernel_signature_arguments_and_function};
+use itertools::max;
 
-extern "C" {
-    fn get_powers_of_w_kernel(
-        log_degree: u32,
-        offset: u32,
-        inverse: bool,
-        bit_reverse: bool,
-        result: *mut GoldilocksField,
-        count: u32,
-    );
+type BF = BaseField;
+type EF = VectorizedExtensionField;
 
-    fn get_powers_of_g_kernel(
-        log_degree: u32,
-        offset: u32,
-        inverse: bool,
-        bit_reverse: bool,
-        result: *mut GoldilocksField,
-        count: u32,
-    );
-
-    fn get_powers_by_val_bf_kernel(
-        base: GoldilocksField,
-        offset: u32,
-        bit_reverse: bool,
-        result: *mut GoldilocksField,
-        count: u32,
-    );
-
-    fn get_powers_by_ref_bf_kernel(
-        base: *const GoldilocksField,
-        offset: u32,
-        bit_reverse: bool,
-        result: *mut GoldilocksField,
-        count: u32,
-    );
-
-    #[allow(improper_ctypes)]
-    fn get_powers_by_val_ef_kernel(
-        base: VectorizedExtensionField,
-        offset: u32,
-        bit_reverse: bool,
-        result: *mut VectorizedExtensionField,
-        count: u32,
-    );
-
-    #[allow(improper_ctypes)]
-    fn get_powers_by_ref_ef_kernel(
-        base: *const VectorizedExtensionField,
-        offset: u32,
-        bit_reverse: bool,
-        result: *mut VectorizedExtensionField,
-        count: u32,
-    );
-
-    fn omega_shift_kernel(
-        src: *const GoldilocksField,
-        log_degree: u32,
-        offset: u32,
-        inverse: bool,
-        shift: u32,
-        dst: *mut GoldilocksField,
-        count: u32,
-    );
-
-    fn bit_reverse_naive_kernel(
-        src: PtrAndStride<BaseFieldDeviceType>,
-        dst: MutPtrAndStride<BaseFieldDeviceType>,
-        log_count: u32,
-    );
-
-    fn bit_reverse_kernel(
-        src: PtrAndStride<BaseFieldDeviceType>,
-        dst: MutPtrAndStride<BaseFieldDeviceType>,
-        log_count: u32,
-    );
-
-    fn select_kernel(
-        indexes: *const u32,
-        src: *const GoldilocksField,
-        dst: *mut GoldilocksField,
-        count: u32,
-    );
-
-    fn batch_inv_bf_kernel(
-        src: PtrAndStride<GoldilocksField>,
-        dst: MutPtrAndStride<GoldilocksField>,
-        count: u32,
-    );
-
-    fn batch_inv_ef_kernel(
-        src: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        dst: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
-        count: u32,
-    );
-
-    fn pack_variable_indexes_kernel(src: *const u64, dst: *mut u32, count: u32);
-
-    fn mark_ends_of_runs_kernel(
-        run_lengths: *const u32,
-        run_offsets: *const u32,
-        result: *mut u32,
-        count: u32,
-    );
-
-    fn generate_permutation_matrix_kernel(
-        unique_variable_indexes: *const u32,
-        run_indexes: *const u32,
-        run_lengths: *const u32,
-        run_offsets: *const u32,
-        cell_indexes: *const u32,
-        scalars: *const GoldilocksField,
-        result: *mut GoldilocksField,
-        columns_count: u32,
-        log_rows_count: u32,
-    );
-
-    fn set_values_from_packed_bits_kernel(
-        packed_bits: *const u32,
-        result: *mut GoldilocksField,
-        count: u32,
-    );
-
-    fn fold_kernel(
-        coset_inverse: GoldilocksField,
-        challenge: *const ExtensionFieldDeviceType,
-        src: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        dst: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
-        count: u32,
-    );
-
-    fn partial_products_f_g_chunk_kernel(
-        num: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
-        denom: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
-        variable_cols_chunk: PtrAndStride<GoldilocksField>,
-        sigma_cols_chunk: PtrAndStride<GoldilocksField>,
-        omega_values: PtrAndStride<GoldilocksField>,
-        non_residues_by_beta_chunk: *const ExtensionFieldDeviceType,
-        beta_c0: *const GoldilocksField,
-        beta_c1: *const GoldilocksField,
-        gamma_c0: *const GoldilocksField,
-        gamma_c1: *const GoldilocksField,
-        num_cols_this_chunk: u32,
-        count: u32,
-    );
-
-    fn partial_products_quotient_terms_kernel(
-        partial_products: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        z_poly: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        variable_cols: PtrAndStride<GoldilocksField>,
-        sigma_cols: PtrAndStride<GoldilocksField>,
-        omega_values: PtrAndStride<GoldilocksField>,
-        powers_of_alpha: *const ExtensionFieldDeviceType,
-        non_residues_by_beta: *const ExtensionFieldDeviceType,
-        beta_c0: *const GoldilocksField,
-        beta_c1: *const GoldilocksField,
-        gamma_c0: *const GoldilocksField,
-        gamma_c1: *const GoldilocksField,
-        quotient: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
-        num_cols: u32,
-        num_cols_per_product: u32,
-        count: u32,
-    );
-
-    fn lookup_aggregated_table_values_kernel(
-        table_cols: PtrAndStride<GoldilocksField>,
-        beta_c0: *const GoldilocksField,
-        beta_c1: *const GoldilocksField,
-        powers_of_gamma: *const ExtensionFieldDeviceType,
-        aggregated_table_values: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
-        num_cols: u32,
-        count: u32,
-    );
-
-    fn lookup_subargs_a_and_b_kernel(
-        variable_cols: PtrAndStride<GoldilocksField>,
-        subargs_a: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
-        subargs_b: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
-        beta_c0: *const GoldilocksField,
-        beta_c1: *const GoldilocksField,
-        powers_of_gamma: *const ExtensionFieldDeviceType,
-        table_id_col: PtrAndStride<GoldilocksField>,
-        aggregated_table_values_inv: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        multiplicity_cols: PtrAndStride<GoldilocksField>,
-        num_subargs_a: u32,
-        num_subargs_b: u32,
-        num_cols_per_subarg: u32,
-        count: u32,
-    );
-
-    fn lookup_quotient_a_and_b_kernel(
-        variable_cols: PtrAndStride<GoldilocksField>,
-        table_cols: PtrAndStride<GoldilocksField>,
-        subargs_a: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        subargs_b: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        beta_c0: *const GoldilocksField,
-        beta_c1: *const GoldilocksField,
-        powers_of_gamma: *const ExtensionFieldDeviceType,
-        powers_of_alpha: *const ExtensionFieldDeviceType,
-        table_id_col: PtrAndStride<GoldilocksField>,
-        multiplicity_cols: PtrAndStride<GoldilocksField>,
-        quotient: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
-        num_subargs_a: u32,
-        num_subargs_b: u32,
-        num_cols_per_subarg: u32,
-        count: u32,
-    );
-
-    fn deep_quotient_except_public_inputs_kernel(
-        variable_cols: PtrAndStride<GoldilocksField>,
-        witness_cols: PtrAndStride<GoldilocksField>,
-        constant_cols: PtrAndStride<GoldilocksField>,
-        permutation_cols: PtrAndStride<GoldilocksField>,
-        z_poly: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        partial_products: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        multiplicity_cols: PtrAndStride<GoldilocksField>,
-        lookup_a_polys: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        lookup_b_polys: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        table_cols: PtrAndStride<GoldilocksField>,
-        quotient_constraint_polys: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        evaluations_at_z: *const ExtensionFieldDeviceType,
-        evaluations_at_z_omega: *const ExtensionFieldDeviceType,
-        evaluations_at_zero: *const ExtensionFieldDeviceType,
-        challenges: *const ExtensionFieldDeviceType,
-        denom_at_z: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        denom_at_z_omega: PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        denom_at_zero: PtrAndStride<GoldilocksField>,
-        quotient: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
-        num_variable_cols: u32,
-        num_witness_cols: u32,
-        num_constants_cols: u32,
-        num_permutation_cols: u32,
-        num_partial_products: u32,
-        num_multiplicity_cols: u32,
-        num_lookup_a_polys: u32,
-        num_lookup_b_polys: u32,
-        num_table_cols: u32,
-        num_quotient_constraint_polys: u32,
-        z_omega_challenge_offset: u32,
-        zero_challenge_offset: u32,
-        count: u32,
-    );
-
-    fn deep_quotient_public_input_kernel(
-        values: PtrAndStride<GoldilocksField>,
-        expected_value: GoldilocksField,
-        challenge: *const ExtensionFieldDeviceType,
-        quotient: MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
-        count: u32,
-    );
-}
-
-fn get_launch_dims(count: u32) -> (dim3, dim3) {
+fn get_launch_dims(count: u32) -> (Dim3, Dim3) {
     get_grid_block_dims_for_threads_count(WARP_SIZE * 4, count)
 }
 
-fn launch_get_powers_of_w_or_g_kernel(
-    kernel: KernelSixArgs<u32, u32, bool, bool, *mut GoldilocksField, u32>,
+cuda_kernel!(
+    GetPowerOf,
+    get_powers_of_kernel,
     log_degree: u32,
     offset: u32,
     inverse: bool,
     bit_reverse: bool,
-    result: &mut DeviceSlice<GoldilocksField>,
+    result: *mut BF,
+    count: u32,
+);
+
+fn get_powers_of(
+    kernel_function: GetPowerOfSignature,
+    log_degree: u32,
+    offset: u32,
+    inverse: bool,
+    bit_reverse: bool,
+    result: &mut DeviceSlice<BF>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
     assert!(result.len() <= u32::MAX as usize);
     let count = result.len() as u32;
     let (grid_dim, block_dim) = get_launch_dims(count);
     let result = result.as_mut_ptr();
-    let args = (
-        &log_degree,
-        &offset,
-        &inverse,
-        &bit_reverse,
-        &result,
-        &count,
-    );
-    unsafe { kernel.launch(grid_dim, block_dim, args, 0, stream) }
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = GetPowerOfArguments::new(log_degree, offset, inverse, bit_reverse, result, count);
+    GetPowerOfFunction(kernel_function).launch(&config, &args)
 }
 
-pub fn get_powers_of_w(
-    log_degree: u32,
+macro_rules! get_powers_of_impl {
+    ($x:ident) => {
+        paste! {
+            get_powers_of_kernel!([<get_powers_of_ $x _kernel>]);
+            pub fn [<get_powers_of_ $x>](
+                log_degree: u32,
+                offset: u32,
+                inverse: bool,
+                bit_reverse: bool,
+                result: &mut DeviceSlice<BF>,
+                stream: &CudaStream,
+            ) -> CudaResult<()> {
+                get_powers_of(
+                    [<get_powers_of_ $x _kernel>],
+                    log_degree,
+                    offset,
+                    inverse,
+                    bit_reverse,
+                    result,
+                    stream,
+                )
+            }
+
+        }
+    };
+}
+
+get_powers_of_impl!(w);
+get_powers_of_impl!(g);
+
+cuda_kernel_signature_arguments_and_function!(
+    GetPowersByVal<T>,
+    base: T,
     offset: u32,
-    inverse: bool,
     bit_reverse: bool,
-    result: &mut DeviceSlice<GoldilocksField>,
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    launch_get_powers_of_w_or_g_kernel(
-        get_powers_of_w_kernel,
-        log_degree,
-        offset,
-        inverse,
-        bit_reverse,
-        result,
-        stream,
-    )
-}
+    result: *mut T,
+    count: u32,
+);
 
-pub fn get_powers_of_g(
-    log_degree: u32,
-    offset: u32,
-    inverse: bool,
-    bit_reverse: bool,
-    result: &mut DeviceSlice<GoldilocksField>,
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    launch_get_powers_of_w_or_g_kernel(
-        get_powers_of_g_kernel,
-        log_degree,
-        offset,
-        inverse,
-        bit_reverse,
-        result,
-        stream,
-    )
+macro_rules! get_powers_by_val_kernel {
+    ($type:ty) => {
+        paste! {
+            cuda_kernel_declaration!(
+                [<get_powers_by_val_ $type:lower _kernel>](
+                    base: $type,
+                    offset: u32,
+                    bit_reverse: bool,
+                    result: *mut $type,
+                    count: u32,
+                )
+            );
+        }
+    };
 }
-
-type GetPowersByValKernel<T> = KernelFiveArgs<T, u32, bool, *mut T, u32>;
 
 pub trait GetPowersByVal: Sized {
-    fn get_kernel() -> GetPowersByValKernel<Self>;
-
-    fn get_powers_by_val(
-        base: Self,
-        offset: u32,
-        bit_reverse: bool,
-        result: &mut DeviceSlice<Self>,
-        stream: &CudaStream,
-    ) -> CudaResult<()> {
-        assert!(result.len() <= u32::MAX as usize);
-        let count = result.len() as u32;
-        let (grid_dim, block_dim) = get_launch_dims(count);
-        let result = result.as_mut_ptr();
-        let args = (&base, &offset, &bit_reverse, &result, &count);
-        let kernel = Self::get_kernel();
-        unsafe { kernel.launch(grid_dim, block_dim, args, 0, stream) }
-    }
+    const KERNEL_FUNCTION: GetPowersByValSignature<Self>;
 }
 
 pub fn get_powers_by_val<T: GetPowersByVal>(
@@ -369,54 +120,56 @@ pub fn get_powers_by_val<T: GetPowersByVal>(
     result: &mut DeviceSlice<T>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
-    T::get_powers_by_val(base, offset, bit_reverse, result, stream)
+    assert!(result.len() <= u32::MAX as usize);
+    let count = result.len() as u32;
+    let (grid_dim, block_dim) = get_launch_dims(count);
+    let result = result.as_mut_ptr();
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = GetPowersByValArguments::new(base, offset, bit_reverse, result, count);
+    GetPowersByValFunction(T::KERNEL_FUNCTION).launch(&config, &args)
 }
 
-impl GetPowersByVal for GoldilocksField {
-    fn get_kernel() -> GetPowersByValKernel<Self> {
-        get_powers_by_val_bf_kernel
-    }
+macro_rules! get_powers_by_val_impl {
+    ($type:ty) => {
+        paste! {
+            get_powers_by_val_kernel!($type);
+            impl GetPowersByVal for $type {
+                const KERNEL_FUNCTION: GetPowersByValSignature<Self> = [<get_powers_by_val_ $type:lower _kernel>];
+            }
+        }
+    };
 }
 
-impl GetPowersByVal for VectorizedExtensionField {
-    fn get_kernel() -> GetPowersByValKernel<Self> {
-        get_powers_by_val_ef_kernel
-    }
-}
+get_powers_by_val_impl!(BF);
+get_powers_by_val_impl!(EF);
 
-type GetPowersByRefKernel<T> = KernelFiveArgs<*const T, u32, bool, *mut T, u32>;
+cuda_kernel_signature_arguments_and_function!(
+    GetPowersByRef<T>,
+    base: *const T,
+    offset: u32,
+    bit_reverse: bool,
+    result: *mut T,
+    count: u32,
+);
+
+macro_rules! get_powers_by_ref_kernel {
+    ($type:ty) => {
+        paste! {
+            cuda_kernel_declaration!(
+                [<get_powers_by_ref_ $type:lower _kernel>](
+                    base: *const $type,
+                    offset: u32,
+                    bit_reverse: bool,
+                    result: *mut $type,
+                    count: u32,
+                )
+            );
+        }
+    };
+}
 
 pub trait GetPowersByRef: Sized {
-    fn get_kernel() -> GetPowersByRefKernel<Self>;
-
-    fn get_powers_by_ref(
-        base: &DeviceVariable<Self>,
-        offset: u32,
-        bit_reverse: bool,
-        result: &mut DeviceSlice<Self>,
-        stream: &CudaStream,
-    ) -> CudaResult<()> {
-        assert!(result.len() <= u32::MAX as usize);
-        let count = result.len() as u32;
-        let (grid_dim, block_dim) = get_launch_dims(count);
-        let base = base.as_ptr();
-        let result = result.as_mut_ptr();
-        let args = (&base, &offset, &bit_reverse, &result, &count);
-        let kernel = Self::get_kernel();
-        unsafe { kernel.launch(grid_dim, block_dim, args, 0, stream) }
-    }
-}
-
-impl GetPowersByRef for GoldilocksField {
-    fn get_kernel() -> GetPowersByRefKernel<Self> {
-        get_powers_by_ref_bf_kernel
-    }
-}
-
-impl GetPowersByRef for VectorizedExtensionField {
-    fn get_kernel() -> GetPowersByRefKernel<Self> {
-        get_powers_by_ref_ef_kernel
-    }
+    const KERNEL_FUNCTION: GetPowersByRefSignature<Self>;
 }
 
 pub fn get_powers_by_ref<T: GetPowersByRef>(
@@ -426,30 +179,69 @@ pub fn get_powers_by_ref<T: GetPowersByRef>(
     result: &mut DeviceSlice<T>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
-    T::get_powers_by_ref(base, offset, bit_reverse, result, stream)
+    assert!(result.len() <= u32::MAX as usize);
+    let count = result.len() as u32;
+    let (grid_dim, block_dim) = get_launch_dims(count);
+    let base = base.as_ptr();
+    let result = result.as_mut_ptr();
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = GetPowersByRefArguments::new(base, offset, bit_reverse, result, count);
+    GetPowersByRefFunction(T::KERNEL_FUNCTION).launch(&config, &args)
+}
+
+macro_rules! get_powers_by_ref_impl {
+    ($type:ty) => {
+        paste! {
+            get_powers_by_ref_kernel!($type);
+            impl GetPowersByRef for $type {
+                const KERNEL_FUNCTION: GetPowersByRefSignature<Self> = [<get_powers_by_ref_ $type:lower _kernel>];
+            }
+        }
+    };
+}
+
+get_powers_by_ref_impl!(BF);
+get_powers_by_ref_impl!(EF);
+
+cuda_kernel!(
+    OmegaShift,
+    omega_shift_kernel(
+        src: *const BF,
+        log_degree: u32,
+        offset: u32,
+        inverse: bool,
+        shift: u32,
+        dst: *mut BF,
+        count: u32,
+    )
+);
+
+fn launch_omega_shift(args: &OmegaShiftArguments, stream: &CudaStream) -> CudaResult<()> {
+    let (grid_dim, block_dim) = get_launch_dims(args.count);
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    OmegaShiftFunction::default().launch(&config, args)
 }
 
 pub fn omega_shift(
-    src: &DeviceSlice<GoldilocksField>,
+    src: &DeviceSlice<BF>,
     log_degree: u32,
     offset: u32,
     inverse: bool,
     shift: u32,
-    dst: &mut DeviceSlice<GoldilocksField>,
+    dst: &mut DeviceSlice<BF>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
     assert_eq!(src.len(), dst.len());
     assert!(dst.len() <= u32::MAX as usize);
     let count = dst.len() as u32;
-    let (grid_dim, block_dim) = get_launch_dims(count);
     let src = src.as_ptr();
     let dst = dst.as_mut_ptr();
-    let args = (&src, &log_degree, &offset, &inverse, &shift, &dst, &count);
-    unsafe { KernelSevenArgs::launch(omega_shift_kernel, grid_dim, block_dim, args, 0, stream) }
+    let args = OmegaShiftArguments::new(src, log_degree, offset, inverse, shift, dst, count);
+    launch_omega_shift(&args, stream)
 }
 
 pub fn omega_shift_in_place(
-    values: &mut DeviceSlice<GoldilocksField>,
+    values: &mut DeviceSlice<BF>,
     log_degree: u32,
     offset: u32,
     inverse: bool,
@@ -458,18 +250,28 @@ pub fn omega_shift_in_place(
 ) -> CudaResult<()> {
     assert!(values.len() <= u32::MAX as usize);
     let count = values.len() as u32;
-    let (grid_dim, block_dim) = get_launch_dims(count);
     let src = values.as_ptr();
     let dst = values.as_mut_ptr();
-    let args = (&src, &log_degree, &offset, &inverse, &shift, &dst, &count);
-    unsafe { KernelSevenArgs::launch(omega_shift_kernel, grid_dim, block_dim, args, 0, stream) }
+    let args = OmegaShiftArguments::new(src, log_degree, offset, inverse, shift, dst, count);
+    launch_omega_shift(&args, stream)
 }
+
+cuda_kernel!(
+    BitReverse,
+    bit_reverse_kernel,
+    src: PtrAndStride<<BF as DeviceRepr>::Type>,
+    dst: MutPtrAndStride<<BF as DeviceRepr>::Type>,
+    log_count: u32,
+);
+
+bit_reverse_kernel!(bit_reverse_naive_kernel);
+bit_reverse_kernel!(bit_reverse_kernel);
 
 fn launch_bit_reverse(
     rows: usize,
     cols: usize,
-    src: PtrAndStride<BaseField>,
-    dst: MutPtrAndStride<BaseField>,
+    src: PtrAndStride<BF>,
+    dst: MutPtrAndStride<BF>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
     assert!(rows.is_power_of_two());
@@ -478,20 +280,12 @@ fn launch_bit_reverse(
     let log_count = rows.trailing_zeros();
     let half_log_count = log_count >> 1;
     const LOG_TILE_DIM: u32 = 5;
-    if half_log_count < LOG_TILE_DIM {
+    let args = BitReverseArguments::new(src, dst, log_count);
+    let (function, config) = if half_log_count < LOG_TILE_DIM {
         let (mut grid_dim, block_dim) = get_launch_dims(1 << log_count);
         grid_dim.y = cols as u32;
-        let args = (&src, &dst, &log_count);
-        unsafe {
-            KernelThreeArgs::launch(
-                bit_reverse_naive_kernel,
-                grid_dim,
-                block_dim,
-                args,
-                0,
-                stream,
-            )
-        }
+        let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+        (BitReverseFunction(bit_reverse_naive_kernel), config)
     } else {
         const TILE_DIM: u32 = 1 << LOG_TILE_DIM;
         const BLOCK_ROWS: u32 = 2;
@@ -500,16 +294,17 @@ fn launch_bit_reverse(
         let grid_dim_x = tiles_per_dim * (tiles_per_dim + 1) / 2;
         let grid_dim_y = log_count - (half_log_count << 1) + 1;
         let grid_dim_z = cols as u32;
-        let grid_dim = (grid_dim_x, grid_dim_y, grid_dim_z).into();
-        let block_dim = (TILE_DIM, BLOCK_ROWS, 2).into();
-        let args = (&src, &dst, &log_count);
-        unsafe { KernelThreeArgs::launch(bit_reverse_kernel, grid_dim, block_dim, args, 0, stream) }
-    }
+        let grid_dim = (grid_dim_x, grid_dim_y, grid_dim_z);
+        let block_dim = (TILE_DIM, BLOCK_ROWS, 2);
+        let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+        (BitReverseFunction(bit_reverse_kernel), config)
+    };
+    function.launch(&config, &args)
 }
 
 pub fn bit_reverse(
-    src: &(impl DeviceMatrixChunkImpl<BaseField> + ?Sized),
-    dst: &mut (impl DeviceMatrixChunkMutImpl<BaseField> + ?Sized),
+    src: &(impl DeviceMatrixChunkImpl<BF> + ?Sized),
+    dst: &mut (impl DeviceMatrixChunkMutImpl<BF> + ?Sized),
     stream: &CudaStream,
 ) -> CudaResult<()> {
     let rows = dst.rows();
@@ -522,7 +317,7 @@ pub fn bit_reverse(
 }
 
 pub fn bit_reverse_in_place(
-    values: &mut (impl DeviceMatrixChunkMutImpl<BaseField> + ?Sized),
+    values: &mut (impl DeviceMatrixChunkMutImpl<BF> + ?Sized),
     stream: &CudaStream,
 ) -> CudaResult<()> {
     let rows = values.rows();
@@ -532,106 +327,92 @@ pub fn bit_reverse_in_place(
     launch_bit_reverse(rows, cols, src, dst, stream)
 }
 
-pub fn select(
-    indexes: &DeviceSlice<u32>,
-    src: &DeviceSlice<GoldilocksField>,
-    dst: &mut DeviceSlice<GoldilocksField>,
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    assert!(indexes.len() <= u32::MAX as usize);
-    assert!(src.len() <= u32::MAX as usize);
-    assert!(dst.len() <= u32::MAX as usize);
-    let count = indexes.len() as u32;
-    let (grid_dim, block_dim) = get_launch_dims(count);
-    let indexes = indexes.as_ptr();
-    let src = src.as_ptr();
-    let dst = dst.as_mut_ptr();
-    let args = (&indexes, &src, &dst, &count);
-    unsafe { KernelFourArgs::launch(select_kernel, grid_dim, block_dim, args, 0, stream) }
-}
-
-pub trait BatchInvImpl: DeviceRepr {
-    const INV_BATCH_SIZE: u32;
-    fn get_batch_inv_kernel() -> unsafe extern "C" fn(
-        PtrAndStride<<Self as DeviceRepr>::Type>,
-        MutPtrAndStride<<Self as DeviceRepr>::Type>,
-        u32,
-    );
-}
-
-impl BatchInvImpl for GoldilocksField {
-    const INV_BATCH_SIZE: u32 = 10;
-    fn get_batch_inv_kernel(
-    ) -> unsafe extern "C" fn(PtrAndStride<GoldilocksField>, MutPtrAndStride<GoldilocksField>, u32)
-    {
-        batch_inv_bf_kernel
-    }
-}
-
-impl BatchInvImpl for VectorizedExtensionField {
-    const INV_BATCH_SIZE: u32 = 6;
-    fn get_batch_inv_kernel() -> unsafe extern "C" fn(
-        PtrAndStride<VectorizedExtensionFieldDeviceType>,
-        MutPtrAndStride<VectorizedExtensionFieldDeviceType>,
-        u32,
-    ) {
-        batch_inv_ef_kernel
-    }
-}
-
-fn launch_batch_inv_kernel<T: BatchInvImpl>(
-    values: PtrAndStride<<T as DeviceRepr>::Type>,
-    result: MutPtrAndStride<<T as DeviceRepr>::Type>,
+cuda_kernel_signature_arguments_and_function!(
+    BatchInv<T: DeviceRepr>,
+    src: PtrAndStride<<T as DeviceRepr>::Type>,
+    dst: MutPtrAndStride<<T as DeviceRepr>::Type>,
     count: u32,
-    batch_size: u32,
+);
+
+macro_rules! batch_inv_kernel {
+    ($type:ty) => {
+        paste! {
+            cuda_kernel_declaration!(
+                [<batch_inv_ $type:lower _kernel>](
+                    src: PtrAndStride<<$type as DeviceRepr>::Type>,
+                    dst: MutPtrAndStride<<$type as DeviceRepr>::Type>,
+                    count: u32,
+                )
+            );
+        }
+    };
+}
+
+pub trait BatchInv: DeviceRepr {
+    const BATCH_SIZE: u32;
+    const KERNEL_FUNCTION: BatchInvSignature<Self>;
+}
+
+pub fn launch_batch_inv<T: BatchInv>(
+    src: PtrAndStride<<T as DeviceRepr>::Type>,
+    dst: MutPtrAndStride<<T as DeviceRepr>::Type>,
+    count: u32,
     stream: &CudaStream,
 ) -> CudaResult<()> {
     let block_dim = WARP_SIZE * 4;
-    let grid_dim = (count + batch_size * block_dim - 1) / (batch_size * block_dim);
-    let block_dim: dim3 = block_dim.into();
-    let grid_dim: dim3 = grid_dim.into();
-    let args = (&values, &result, &count);
-    unsafe {
-        KernelThreeArgs::launch(
-            T::get_batch_inv_kernel(),
-            grid_dim,
-            block_dim,
-            args,
-            0,
-            stream,
-        )
-    }
+    let grid_dim = (count + T::BATCH_SIZE * block_dim - 1) / (T::BATCH_SIZE * block_dim);
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = BatchInvArguments::<T>::new(src, dst, count);
+    BatchInvFunction::<T>(T::KERNEL_FUNCTION).launch(&config, &args)
 }
 
-pub fn batch_inv<T: BatchInvImpl>(
+pub fn batch_inv<T: BatchInv>(
     src: &DeviceSlice<T>,
     dst: &mut DeviceSlice<T>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
     assert_eq!(src.len(), dst.len());
     assert!(dst.len() <= u32::MAX as usize);
-    launch_batch_inv_kernel::<T>(
+    launch_batch_inv::<T>(
         DeviceVectorImpl::as_ptr_and_stride(src),
         DeviceVectorMutImpl::as_mut_ptr_and_stride(dst),
         dst.len() as u32,
-        T::INV_BATCH_SIZE,
         stream,
     )
 }
 
-pub fn batch_inv_in_place<T: BatchInvImpl>(
+pub fn batch_inv_in_place<T: BatchInv>(
     values: &mut DeviceSlice<T>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
     assert!(values.len() <= u32::MAX as usize);
-    launch_batch_inv_kernel::<T>(
+    launch_batch_inv::<T>(
         DeviceVectorImpl::as_ptr_and_stride(values),
         DeviceVectorMutImpl::as_mut_ptr_and_stride(values),
         values.len() as u32,
-        T::INV_BATCH_SIZE,
         stream,
     )
 }
+
+macro_rules! batch_inv_impl {
+    ($type:ty, $batch_size:expr) => {
+        paste! {
+            batch_inv_kernel!($type);
+            impl BatchInv for $type {
+                const BATCH_SIZE: u32 = $batch_size;
+                const KERNEL_FUNCTION: BatchInvSignature<Self> = [<batch_inv_ $type:lower _kernel>];
+            }
+        }
+    };
+}
+
+batch_inv_impl!(BF, 10);
+batch_inv_impl!(EF, 6);
+
+cuda_kernel!(
+    PackVariableIndexes,
+    pack_variable_indexes_kernel(src: *const u64, dst: *mut u32, count: u32)
+);
 
 pub fn pack_variable_indexes(
     src: &DeviceSlice<u64>,
@@ -644,18 +425,49 @@ pub fn pack_variable_indexes(
     let (grid_dim, block_dim) = get_launch_dims(count);
     let src = src.as_ptr();
     let dst = dst.as_mut_ptr();
-    let args = (&src, &dst, &count);
-    unsafe {
-        KernelThreeArgs::launch(
-            pack_variable_indexes_kernel,
-            grid_dim,
-            block_dim,
-            args,
-            0,
-            stream,
-        )
-    }
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = PackVariableIndexesArguments::new(src, dst, count);
+    PackVariableIndexesFunction::default().launch(&config, &args)
 }
+
+cuda_kernel!(
+    Select,
+    select_kernel(
+        indexes: *const u32,
+        src: *const BF,
+        dst: *mut BF,
+        count: u32,
+    )
+);
+
+pub fn select(
+    indexes: &DeviceSlice<u32>,
+    src: &DeviceSlice<BF>,
+    dst: &mut DeviceSlice<BF>,
+    stream: &CudaStream,
+) -> CudaResult<()> {
+    assert!(indexes.len() <= u32::MAX as usize);
+    assert!(src.len() <= u32::MAX as usize);
+    assert!(dst.len() <= u32::MAX as usize);
+    let count = indexes.len() as u32;
+    let (grid_dim, block_dim) = get_launch_dims(count);
+    let indexes = indexes.as_ptr();
+    let src = src.as_ptr();
+    let dst = dst.as_mut_ptr();
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = SelectArguments::new(indexes, src, dst, count);
+    SelectFunction::default().launch(&config, &args)
+}
+
+cuda_kernel!(
+    MarkEndsOfRuns,
+    mark_ends_of_runs_kernel(
+        run_lengths: *const u32,
+        run_offsets: *const u32,
+        result: *mut u32,
+        count: u32,
+    )
+);
 
 pub fn mark_ends_of_runs(
     run_lengths: &DeviceSlice<u32>,
@@ -671,18 +483,25 @@ pub fn mark_ends_of_runs(
     let run_lengths = run_lengths.as_ptr();
     let run_offsets = run_offsets.as_ptr();
     let result = result.as_mut_ptr();
-    let args = (&run_lengths, &run_offsets, &result, &count);
-    unsafe {
-        KernelFourArgs::launch(
-            mark_ends_of_runs_kernel,
-            grid_dim,
-            block_dim,
-            args,
-            0,
-            stream,
-        )
-    }
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = MarkEndsOfRunsArguments::new(run_lengths, run_offsets, result, count);
+    MarkEndsOfRunsFunction::default().launch(&config, &args)
 }
+
+cuda_kernel!(
+    GeneratePermutationMatrix,
+    generate_permutation_matrix_kernel(
+        unique_variable_indexes: *const u32,
+        run_indexes: *const u32,
+        run_lengths: *const u32,
+        run_offsets: *const u32,
+        cell_indexes: *const u32,
+        scalars: *const BF,
+        result: *mut BF,
+        columns_count: u32,
+        log_rows_count: u32,
+        )
+);
 
 #[allow(clippy::too_many_arguments)]
 fn generate_permutation_matrix_raw(
@@ -691,8 +510,8 @@ fn generate_permutation_matrix_raw(
     run_lengths: &DeviceSlice<u32>,
     run_offsets: &DeviceSlice<u32>,
     cell_indexes: &DeviceSlice<u32>,
-    scalars: &DeviceSlice<GoldilocksField>,
-    result: &mut DeviceSlice<GoldilocksField>,
+    scalars: &DeviceSlice<BF>,
+    result: &mut DeviceSlice<BF>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
     assert!(run_indexes.len() <= u32::MAX as usize);
@@ -716,28 +535,19 @@ fn generate_permutation_matrix_raw(
     let cell_indexes = cell_indexes.as_ptr();
     let scalars = scalars.as_ptr();
     let result = result.as_mut_ptr();
-    let mut args = kernel_args!(
-        &unique_variable_indexes,
-        &run_indexes,
-        &run_lengths,
-        &run_offsets,
-        &cell_indexes,
-        &scalars,
-        &result,
-        &columns_count,
-        &log_rows_count,
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = GeneratePermutationMatrixArguments::new(
+        unique_variable_indexes,
+        run_indexes,
+        run_lengths,
+        run_offsets,
+        cell_indexes,
+        scalars,
+        result,
+        columns_count,
+        log_rows_count,
     );
-    unsafe {
-        cudaLaunchKernel(
-            generate_permutation_matrix_kernel as *const _,
-            grid_dim,
-            block_dim,
-            args.as_mut_ptr(),
-            0,
-            stream.into(),
-        )
-        .wrap()
-    }
+    GeneratePermutationMatrixFunction::default().launch(&config, &args)
 }
 
 pub fn get_generate_permutation_matrix_temp_storage_bytes(num_cells: usize) -> CudaResult<usize> {
@@ -754,8 +564,8 @@ pub fn get_generate_permutation_matrix_temp_storage_bytes(num_cells: usize) -> C
 pub fn generate_permutation_matrix(
     temp_storage: &mut DeviceSlice<u8>,
     variable_indexes: &DeviceSlice<u32>,
-    scalars: &DeviceSlice<GoldilocksField>,
-    result: &mut DeviceSlice<GoldilocksField>,
+    scalars: &DeviceSlice<BF>,
+    result: &mut DeviceSlice<BF>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
     let num_cells = variable_indexes.len();
@@ -835,9 +645,14 @@ pub fn generate_permutation_matrix(
     )
 }
 
+cuda_kernel!(
+    SetValuesFromPacketBits,
+    set_values_from_packed_bits_kernel(packed_bits: *const u32, result: *mut BF, count: u32,)
+);
+
 pub fn set_values_from_packed_bits(
     packed_bits: &DeviceSlice<u32>,
-    result: &mut DeviceSlice<GoldilocksField>,
+    result: &mut DeviceSlice<BF>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
     assert!(packed_bits.len() <= u32::MAX as usize);
@@ -849,29 +664,32 @@ pub fn set_values_from_packed_bits(
     assert!((words_count - 1) * 32 < count);
     let packed_bits = packed_bits.as_ptr();
     let result = result.as_mut_ptr();
-    let args = (&packed_bits, &result, &count);
-    unsafe {
-        KernelThreeArgs::launch(
-            set_values_from_packed_bits_kernel,
-            grid_dim,
-            block_dim,
-            args,
-            0,
-            stream,
-        )
-    }
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = SetValuesFromPacketBitsArguments::new(packed_bits, result, count);
+    SetValuesFromPacketBitsFunction::default().launch(&config, &args)
 }
 
+cuda_kernel!(
+    Fold,
+    fold_kernel(
+        coset_inverse: BF,
+        challenge: *const <ExtensionField as DeviceRepr>::Type,
+        src: PtrAndStride<<EF as DeviceRepr>::Type>,
+        dst: MutPtrAndStride<<EF as DeviceRepr>::Type>,
+        count: u32,
+    )
+);
+
 pub fn fold<S, D>(
-    coset_inverse: GoldilocksField,
+    coset_inverse: BF,
     challenge: &DeviceVariable<ExtensionField>,
     src: &S,
     dst: &mut D,
     stream: &CudaStream,
 ) -> CudaResult<()>
 where
-    S: DeviceVectorImpl<VectorizedExtensionField> + ?Sized,
-    D: DeviceVectorMutImpl<VectorizedExtensionField> + ?Sized,
+    S: DeviceVectorImpl<EF> + ?Sized,
+    D: DeviceVectorMutImpl<EF> + ?Sized,
 {
     assert!(src.slice().len().is_power_of_two());
     assert!(dst.slice().len().is_power_of_two());
@@ -879,25 +697,44 @@ where
     assert_eq!(src.slice().len().ilog2(), log_count + 1);
     assert!(log_count < 32);
     let (grid_dim, block_dim) = get_launch_dims(1 << log_count);
-    let challenge = challenge.as_ptr() as *const ExtensionFieldDeviceType;
+    let challenge = challenge.as_ptr() as *const <ExtensionField as DeviceRepr>::Type;
     let src = src.as_ptr_and_stride();
     let dst = dst.as_mut_ptr_and_stride();
-    let args = (&coset_inverse, &challenge, &src, &dst, &log_count);
-    unsafe { KernelFiveArgs::launch(fold_kernel, grid_dim, block_dim, args, 0, stream) }
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = FoldArguments::new(coset_inverse, challenge, src, dst, log_count);
+    FoldFunction::default().launch(&config, &args)
 }
+
+cuda_kernel!(
+    PartialProductsOfFGCHunk,
+    partial_products_f_g_chunk_kernel(
+        num: MutPtrAndStride<<EF as DeviceRepr>::Type>,
+        denom: MutPtrAndStride<<EF as DeviceRepr>::Type>,
+        variable_cols_chunk: PtrAndStride<BF>,
+        sigma_cols_chunk: PtrAndStride<BF>,
+        omega_values: PtrAndStride<BF>,
+        non_residues_by_beta_chunk: *const <ExtensionField as DeviceRepr>::Type,
+        beta_c0: *const BF,
+        beta_c1: *const BF,
+        gamma_c0: *const BF,
+        gamma_c1: *const BF,
+        num_cols_this_chunk: u32,
+        count: u32,
+    )
+);
 
 #[allow(clippy::too_many_arguments)]
 pub fn partial_products_f_g_chunk(
-    num: &mut (impl DeviceVectorMutImpl<VectorizedExtensionField> + ?Sized),
-    denom: &mut (impl DeviceVectorMutImpl<VectorizedExtensionField> + ?Sized),
-    variable_cols_chunk: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    sigma_cols_chunk: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    omega_values: &(impl DeviceVectorImpl<GoldilocksField> + ?Sized),
+    num: &mut (impl DeviceVectorMutImpl<EF> + ?Sized),
+    denom: &mut (impl DeviceVectorMutImpl<EF> + ?Sized),
+    variable_cols_chunk: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    sigma_cols_chunk: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    omega_values: &(impl DeviceVectorImpl<BF> + ?Sized),
     non_residues_by_beta_chunk: &(impl DeviceVectorImpl<ExtensionField> + ?Sized),
-    beta_c0: &DeviceVariable<GoldilocksField>,
-    beta_c1: &DeviceVariable<GoldilocksField>,
-    gamma_c0: &DeviceVariable<GoldilocksField>,
-    gamma_c1: &DeviceVariable<GoldilocksField>,
+    beta_c0: &DeviceVariable<BF>,
+    beta_c1: &DeviceVariable<BF>,
+    gamma_c0: &DeviceVariable<BF>,
+    gamma_c1: &DeviceVariable<BF>,
     num_cols_per_product: usize,
     stream: &CudaStream,
 ) -> CudaResult<()> {
@@ -925,47 +762,59 @@ pub fn partial_products_f_g_chunk(
     let num_cols = num_cols as u32;
     let count = count as u32;
     let (grid_dim, block_dim) = get_launch_dims(count);
-    let mut args = kernel_args!(
-        &num,
-        &denom,
-        &variable_cols_chunk,
-        &sigma_cols_chunk,
-        &omega_values,
-        &non_residues_by_beta_chunk,
-        &beta_c0,
-        &beta_c1,
-        &gamma_c0,
-        &gamma_c1,
-        &num_cols,
-        &count,
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = PartialProductsOfFGCHunkArguments::new(
+        num,
+        denom,
+        variable_cols_chunk,
+        sigma_cols_chunk,
+        omega_values,
+        non_residues_by_beta_chunk,
+        beta_c0,
+        beta_c1,
+        gamma_c0,
+        gamma_c1,
+        num_cols,
+        count,
     );
-    unsafe {
-        cudaLaunchKernel(
-            partial_products_f_g_chunk_kernel as *const _,
-            grid_dim,
-            block_dim,
-            args.as_mut_ptr(),
-            0,
-            stream.into(),
-        )
-        .wrap()
-    }
+    PartialProductsOfFGCHunkFunction::default().launch(&config, &args)
 }
+
+cuda_kernel!(
+    PartialProductsQuotientTerms,
+    partial_products_quotient_terms_kernel(
+        partial_products: PtrAndStride<<EF as DeviceRepr>::Type>,
+        z_poly: PtrAndStride<<EF as DeviceRepr>::Type>,
+        variable_cols: PtrAndStride<BF>,
+        sigma_cols: PtrAndStride<BF>,
+        omega_values: PtrAndStride<BF>,
+        powers_of_alpha: *const <ExtensionField as DeviceRepr>::Type,
+        non_residues_by_beta: *const <ExtensionField as DeviceRepr>::Type,
+        beta_c0: *const BF,
+        beta_c1: *const BF,
+        gamma_c0: *const BF,
+        gamma_c1: *const BF,
+        quotient: MutPtrAndStride<<EF as DeviceRepr>::Type>,
+        num_cols: u32,
+        num_cols_per_product: u32,
+        count: u32,
+    )
+);
 
 #[allow(clippy::too_many_arguments)]
 pub fn partial_products_quotient_terms(
-    partial_products: &(impl DeviceMatrixImpl<VectorizedExtensionField> + ?Sized),
-    z_poly: &(impl DeviceVectorImpl<VectorizedExtensionField> + ?Sized),
-    variable_cols: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    sigma_cols: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    omega_values: &(impl DeviceVectorImpl<GoldilocksField> + ?Sized),
+    partial_products: &(impl DeviceMatrixImpl<EF> + ?Sized),
+    z_poly: &(impl DeviceVectorImpl<EF> + ?Sized),
+    variable_cols: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    sigma_cols: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    omega_values: &(impl DeviceVectorImpl<BF> + ?Sized),
     powers_of_alpha: &(impl DeviceVectorImpl<ExtensionField> + ?Sized),
     non_residues_by_beta: &(impl DeviceVectorImpl<ExtensionField> + ?Sized),
-    beta_c0: &DeviceVariable<GoldilocksField>,
-    beta_c1: &DeviceVariable<GoldilocksField>,
-    gamma_c0: &DeviceVariable<GoldilocksField>,
-    gamma_c1: &DeviceVariable<GoldilocksField>,
-    quotient: &mut (impl DeviceVectorMutImpl<VectorizedExtensionField> + ?Sized),
+    beta_c0: &DeviceVariable<BF>,
+    beta_c1: &DeviceVariable<BF>,
+    gamma_c0: &DeviceVariable<BF>,
+    gamma_c1: &DeviceVariable<BF>,
+    quotient: &mut (impl DeviceVectorMutImpl<EF> + ?Sized),
     num_cols_per_product: usize,
     stream: &CudaStream,
 ) -> CudaResult<()> {
@@ -1007,42 +856,46 @@ pub fn partial_products_quotient_terms(
     let num_cols_per_product = num_cols_per_product as u32;
     let log_count: u32 = count.trailing_zeros();
     let (grid_dim, block_dim) = get_launch_dims(count as u32);
-    let mut args = kernel_args!(
-        &partial_products,
-        &z_poly,
-        &variable_cols,
-        &sigma_cols,
-        &omega_values,
-        &powers_of_alpha,
-        &non_residues_by_beta,
-        &beta_c0,
-        &beta_c1,
-        &gamma_c0,
-        &gamma_c1,
-        &quotient,
-        &num_cols,
-        &num_cols_per_product,
-        &log_count,
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = PartialProductsQuotientTermsArguments::new(
+        partial_products,
+        z_poly,
+        variable_cols,
+        sigma_cols,
+        omega_values,
+        powers_of_alpha,
+        non_residues_by_beta,
+        beta_c0,
+        beta_c1,
+        gamma_c0,
+        gamma_c1,
+        quotient,
+        num_cols,
+        num_cols_per_product,
+        log_count,
     );
-    unsafe {
-        cudaLaunchKernel(
-            partial_products_quotient_terms_kernel as *const _,
-            grid_dim,
-            block_dim,
-            args.as_mut_ptr(),
-            0,
-            stream.into(),
-        )
-        .wrap()
-    }
+    PartialProductsQuotientTermsFunction::default().launch(&config, &args)
 }
 
+cuda_kernel!(
+    LookupAggregatedTableValues,
+    lookup_aggregated_table_values_kernel(
+        table_cols: PtrAndStride<BF>,
+        beta_c0: *const BF,
+        beta_c1: *const BF,
+        powers_of_gamma: *const <ExtensionField as DeviceRepr>::Type,
+        aggregated_table_values: MutPtrAndStride<<EF as DeviceRepr>::Type>,
+        num_cols: u32,
+        count: u32,
+    )
+);
+
 pub fn lookup_aggregated_table_values(
-    table_cols: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    beta_c0: &DeviceVariable<GoldilocksField>,
-    beta_c1: &DeviceVariable<GoldilocksField>,
+    table_cols: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    beta_c0: &DeviceVariable<BF>,
+    beta_c1: &DeviceVariable<BF>,
     powers_of_gamma: &(impl DeviceVectorImpl<ExtensionField> + ?Sized),
-    aggregated_table_values: &mut (impl DeviceVectorMutImpl<VectorizedExtensionField> + ?Sized),
+    aggregated_table_values: &mut (impl DeviceVectorMutImpl<EF> + ?Sized),
     num_cols: usize,
     stream: &CudaStream,
 ) -> CudaResult<()> {
@@ -1061,39 +914,49 @@ pub fn lookup_aggregated_table_values(
     let num_cols = num_cols as u32;
     let count = count as u32;
     let (grid_dim, block_dim) = get_launch_dims(count);
-    let mut args = kernel_args!(
-        &table_cols,
-        &beta_c0,
-        &beta_c1,
-        &powers_of_gamma,
-        &aggregated_table_values,
-        &num_cols,
-        &count,
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = LookupAggregatedTableValuesArguments::new(
+        table_cols,
+        beta_c0,
+        beta_c1,
+        powers_of_gamma,
+        aggregated_table_values,
+        num_cols,
+        count,
     );
-    unsafe {
-        cudaLaunchKernel(
-            lookup_aggregated_table_values_kernel as *const _,
-            grid_dim,
-            block_dim,
-            args.as_mut_ptr(),
-            0,
-            stream.into(),
-        )
-        .wrap()
-    }
+    LookupAggregatedTableValuesFunction::default().launch(&config, &args)
 }
+
+cuda_kernel!(
+    LookupSubargsAAndB,
+    lookup_subargs_a_and_b_kernel(
+        variable_cols: PtrAndStride<BF>,
+        subargs_a: MutPtrAndStride<<EF as DeviceRepr>::Type>,
+        subargs_b: MutPtrAndStride<<EF as DeviceRepr>::Type>,
+        beta_c0: *const BF,
+        beta_c1: *const BF,
+        powers_of_gamma: *const <ExtensionField as DeviceRepr>::Type,
+        table_id_col: PtrAndStride<BF>,
+        aggregated_table_values_inv: PtrAndStride<<EF as DeviceRepr>::Type>,
+        multiplicity_cols: PtrAndStride<BF>,
+        num_subargs_a: u32,
+        num_subargs_b: u32,
+        num_cols_per_subarg: u32,
+        count: u32,
+    )
+);
 
 #[allow(clippy::too_many_arguments)]
 pub fn lookup_subargs_a_and_b(
-    variable_cols: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    subargs_a: &mut (impl DeviceMatrixMutImpl<VectorizedExtensionField> + ?Sized),
-    subargs_b: &mut (impl DeviceMatrixMutImpl<VectorizedExtensionField> + ?Sized),
-    beta_c0: &DeviceVariable<GoldilocksField>,
-    beta_c1: &DeviceVariable<GoldilocksField>,
+    variable_cols: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    subargs_a: &mut (impl DeviceMatrixMutImpl<EF> + ?Sized),
+    subargs_b: &mut (impl DeviceMatrixMutImpl<EF> + ?Sized),
+    beta_c0: &DeviceVariable<BF>,
+    beta_c1: &DeviceVariable<BF>,
     powers_of_gamma: &(impl DeviceVectorImpl<ExtensionField> + ?Sized),
-    table_id_col: &(impl DeviceVectorImpl<GoldilocksField> + ?Sized),
-    aggregated_table_values_inv: &(impl DeviceVectorImpl<VectorizedExtensionField> + ?Sized),
-    multiplicity_cols: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
+    table_id_col: &(impl DeviceVectorImpl<BF> + ?Sized),
+    aggregated_table_values_inv: &(impl DeviceVectorImpl<EF> + ?Sized),
+    multiplicity_cols: &(impl DeviceMatrixImpl<BF> + ?Sized),
     num_cols_per_subarg: usize,
     stream: &CudaStream,
 ) -> CudaResult<()> {
@@ -1128,47 +991,59 @@ pub fn lookup_subargs_a_and_b(
     let num_cols_per_subarg = num_cols_per_subarg as u32;
     let count = count as u32;
     let (grid_dim, block_dim) = get_launch_dims(count);
-    let mut args = kernel_args!(
-        &variable_cols,
-        &subargs_a,
-        &subargs_b,
-        &beta_c0,
-        &beta_c1,
-        &powers_of_gamma,
-        &table_id_col,
-        &aggregated_table_values_inv,
-        &multiplicity_cols,
-        &num_subargs_a,
-        &num_subargs_b,
-        &num_cols_per_subarg,
-        &count,
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = LookupSubargsAAndBArguments::new(
+        variable_cols,
+        subargs_a,
+        subargs_b,
+        beta_c0,
+        beta_c1,
+        powers_of_gamma,
+        table_id_col,
+        aggregated_table_values_inv,
+        multiplicity_cols,
+        num_subargs_a,
+        num_subargs_b,
+        num_cols_per_subarg,
+        count,
     );
-    unsafe {
-        cudaLaunchKernel(
-            lookup_subargs_a_and_b_kernel as *const _,
-            grid_dim,
-            block_dim,
-            args.as_mut_ptr(),
-            0,
-            stream.into(),
-        )
-        .wrap()
-    }
+    LookupSubargsAAndBFunction::default().launch(&config, &args)
 }
+
+cuda_kernel!(
+    LookupQuotientAAndB,
+    lookup_quotient_a_and_b_kernel(
+        variable_cols: PtrAndStride<BF>,
+        table_cols: PtrAndStride<BF>,
+        subargs_a: PtrAndStride<<EF as DeviceRepr>::Type>,
+        subargs_b: PtrAndStride<<EF as DeviceRepr>::Type>,
+        beta_c0: *const BF,
+        beta_c1: *const BF,
+        powers_of_gamma: *const <ExtensionField as DeviceRepr>::Type,
+        powers_of_alpha: *const <ExtensionField as DeviceRepr>::Type,
+        table_id_col: PtrAndStride<BF>,
+        multiplicity_cols: PtrAndStride<BF>,
+        quotient: MutPtrAndStride<<EF as DeviceRepr>::Type>,
+        num_subargs_a: u32,
+        num_subargs_b: u32,
+        num_cols_per_subarg: u32,
+        count: u32,
+    )
+);
 
 #[allow(clippy::too_many_arguments)]
 pub fn lookup_quotient_a_and_b(
-    variable_cols: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    table_cols: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    subargs_a: &(impl DeviceMatrixImpl<VectorizedExtensionField> + ?Sized),
-    subargs_b: &(impl DeviceMatrixImpl<VectorizedExtensionField> + ?Sized),
-    beta_c0: &DeviceVariable<GoldilocksField>,
-    beta_c1: &DeviceVariable<GoldilocksField>,
+    variable_cols: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    table_cols: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    subargs_a: &(impl DeviceMatrixImpl<EF> + ?Sized),
+    subargs_b: &(impl DeviceMatrixImpl<EF> + ?Sized),
+    beta_c0: &DeviceVariable<BF>,
+    beta_c1: &DeviceVariable<BF>,
     powers_of_gamma: &(impl DeviceVectorImpl<ExtensionField> + ?Sized),
     powers_of_alpha: &(impl DeviceVectorImpl<ExtensionField> + ?Sized),
-    table_id_col: &(impl DeviceVectorImpl<GoldilocksField> + ?Sized),
-    multiplicity_cols: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    quotient: &mut (impl DeviceVectorMutImpl<VectorizedExtensionField> + ?Sized),
+    table_id_col: &(impl DeviceVectorImpl<BF> + ?Sized),
+    multiplicity_cols: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    quotient: &mut (impl DeviceVectorMutImpl<EF> + ?Sized),
     num_cols_per_subarg: usize,
     stream: &CudaStream,
 ) -> CudaResult<()> {
@@ -1208,57 +1083,86 @@ pub fn lookup_quotient_a_and_b(
     let num_cols_per_subarg = num_cols_per_subarg as u32;
     let count = count as u32;
     let (grid_dim, block_dim) = get_launch_dims(count);
-    let mut args = kernel_args!(
-        &variable_cols,
-        &table_cols,
-        &subargs_a,
-        &subargs_b,
-        &beta_c0,
-        &beta_c1,
-        &powers_of_gamma,
-        &powers_of_alpha,
-        &table_id_col,
-        &multiplicity_cols,
-        &quotient,
-        &num_subargs_a,
-        &num_subargs_b,
-        &num_cols_per_subarg,
-        &count,
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = LookupQuotientAAndBArguments::new(
+        variable_cols,
+        table_cols,
+        subargs_a,
+        subargs_b,
+        beta_c0,
+        beta_c1,
+        powers_of_gamma,
+        powers_of_alpha,
+        table_id_col,
+        multiplicity_cols,
+        quotient,
+        num_subargs_a,
+        num_subargs_b,
+        num_cols_per_subarg,
+        count,
     );
-    unsafe {
-        cudaLaunchKernel(
-            lookup_quotient_a_and_b_kernel as *const _,
-            grid_dim,
-            block_dim,
-            args.as_mut_ptr(),
-            0,
-            stream.into(),
-        )
-        .wrap()
-    }
+    LookupQuotientAAndBFunction::default().launch(&config, &args)
 }
+
+cuda_kernel!(
+    DeepQuotientExceptPublicInputs,
+    deep_quotient_except_public_inputs_kernel(
+        variable_cols: PtrAndStride<BF>,
+        witness_cols: PtrAndStride<BF>,
+        constant_cols: PtrAndStride<BF>,
+        permutation_cols: PtrAndStride<BF>,
+        z_poly: PtrAndStride<<EF as DeviceRepr>::Type>,
+        partial_products: PtrAndStride<<EF as DeviceRepr>::Type>,
+        multiplicity_cols: PtrAndStride<BF>,
+        lookup_a_polys: PtrAndStride<<EF as DeviceRepr>::Type>,
+        lookup_b_polys: PtrAndStride<<EF as DeviceRepr>::Type>,
+        table_cols: PtrAndStride<BF>,
+        quotient_constraint_polys: PtrAndStride<<EF as DeviceRepr>::Type>,
+        evaluations_at_z: *const <ExtensionField as DeviceRepr>::Type,
+        evaluations_at_z_omega: *const <ExtensionField as DeviceRepr>::Type,
+        evaluations_at_zero: *const <ExtensionField as DeviceRepr>::Type,
+        challenges: *const <ExtensionField as DeviceRepr>::Type,
+        denom_at_z: PtrAndStride<<EF as DeviceRepr>::Type>,
+        denom_at_z_omega: PtrAndStride<<EF as DeviceRepr>::Type>,
+        denom_at_zero: PtrAndStride<BF>,
+        quotient: MutPtrAndStride<<EF as DeviceRepr>::Type>,
+        num_variable_cols: u32,
+        num_witness_cols: u32,
+        num_constants_cols: u32,
+        num_permutation_cols: u32,
+        num_partial_products: u32,
+        num_multiplicity_cols: u32,
+        num_lookup_a_polys: u32,
+        num_lookup_b_polys: u32,
+        num_table_cols: u32,
+        num_quotient_constraint_polys: u32,
+        z_omega_challenge_offset: u32,
+        zero_challenge_offset: u32,
+        count: u32,
+    )
+);
 
 #[allow(clippy::too_many_arguments)]
 pub fn deep_quotient_except_public_inputs(
-    variable_cols: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    witness_cols: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    constant_cols: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    permutation_cols: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    z_poly: &(impl DeviceVectorImpl<VectorizedExtensionField> + ?Sized),
-    partial_products: &(impl DeviceMatrixImpl<VectorizedExtensionField> + ?Sized),
-    multiplicity_cols: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    lookup_a_polys: &(impl DeviceMatrixImpl<VectorizedExtensionField> + ?Sized),
-    lookup_b_polys: &(impl DeviceMatrixImpl<VectorizedExtensionField> + ?Sized),
-    table_cols: &(impl DeviceMatrixImpl<GoldilocksField> + ?Sized),
-    quotient_constraint_polys: &(impl DeviceMatrixImpl<VectorizedExtensionField> + ?Sized),
+    variable_cols: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    witness_cols: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    constant_cols: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    permutation_cols: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    z_poly: &(impl DeviceVectorImpl<EF> + ?Sized),
+    partial_products: &(impl DeviceMatrixImpl<EF> + ?Sized),
+    multiplicity_cols: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    lookup_a_polys: &(impl DeviceMatrixImpl<EF> + ?Sized),
+    lookup_b_polys: &(impl DeviceMatrixImpl<EF> + ?Sized),
+    table_cols: &(impl DeviceMatrixImpl<BF> + ?Sized),
+    quotient_constraint_polys: &(impl DeviceMatrixImpl<EF> + ?Sized),
     evaluations_at_z: &(impl DeviceVectorImpl<ExtensionField> + ?Sized),
     evaluations_at_z_omega: &(impl DeviceVectorImpl<ExtensionField> + ?Sized),
     evaluations_at_zero: &(impl DeviceVectorImpl<ExtensionField> + ?Sized),
     challenges: &(impl DeviceVectorImpl<ExtensionField> + ?Sized),
-    denom_at_z: &(impl DeviceVectorImpl<VectorizedExtensionField> + ?Sized),
-    denom_at_z_omega: &(impl DeviceVectorImpl<VectorizedExtensionField> + ?Sized),
-    denom_at_zero: &(impl DeviceVectorImpl<GoldilocksField> + ?Sized),
-    quotient: &mut (impl DeviceVectorMutImpl<VectorizedExtensionField> + ?Sized),
+    denom_at_z: &(impl DeviceVectorImpl<EF> + ?Sized),
+    denom_at_z_omega: &(impl DeviceVectorImpl<EF> + ?Sized),
+    denom_at_zero: &(impl DeviceVectorImpl<BF> + ?Sized),
+    quotient: &mut (impl DeviceVectorMutImpl<EF> + ?Sized),
     stream: &CudaStream,
 ) -> CudaResult<()> {
     let count = variable_cols.stride();
@@ -1350,58 +1254,60 @@ pub fn deep_quotient_except_public_inputs(
         + 1;
     let count = count as u32;
     let (grid_dim, block_dim) = get_launch_dims(count);
-    let mut args = kernel_args!(
-        &variable_cols,
-        &witness_cols,
-        &constant_cols,
-        &permutation_cols,
-        &z_poly,
-        &partial_products,
-        &multiplicity_cols,
-        &lookup_a_polys,
-        &lookup_b_polys,
-        &table_cols,
-        &quotient_constraint_polys,
-        &evaluations_at_z,
-        &evaluations_at_z_omega,
-        &evaluations_at_zero,
-        &challenges,
-        &denom_at_z,
-        &denom_at_z_omega,
-        &denom_at_zero,
-        &quotient,
-        &num_variable_cols,
-        &num_witness_cols,
-        &num_constant_cols,
-        &num_permutation_cols,
-        &num_partial_products,
-        &num_multiplicity_cols,
-        &num_lookup_a_polys,
-        &num_lookup_b_polys,
-        &num_table_cols,
-        &num_quotient_constraint_polys,
-        &z_omega_challenge_offset,
-        &zero_challenge_offset,
-        &count,
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = DeepQuotientExceptPublicInputsArguments::new(
+        variable_cols,
+        witness_cols,
+        constant_cols,
+        permutation_cols,
+        z_poly,
+        partial_products,
+        multiplicity_cols,
+        lookup_a_polys,
+        lookup_b_polys,
+        table_cols,
+        quotient_constraint_polys,
+        evaluations_at_z,
+        evaluations_at_z_omega,
+        evaluations_at_zero,
+        challenges,
+        denom_at_z,
+        denom_at_z_omega,
+        denom_at_zero,
+        quotient,
+        num_variable_cols,
+        num_witness_cols,
+        num_constant_cols,
+        num_permutation_cols,
+        num_partial_products,
+        num_multiplicity_cols,
+        num_lookup_a_polys,
+        num_lookup_b_polys,
+        num_table_cols,
+        num_quotient_constraint_polys,
+        z_omega_challenge_offset,
+        zero_challenge_offset,
+        count,
     );
-    unsafe {
-        cudaLaunchKernel(
-            deep_quotient_except_public_inputs_kernel as *const _,
-            grid_dim,
-            block_dim,
-            args.as_mut_ptr(),
-            0,
-            stream.into(),
-        )
-        .wrap()
-    }
+    DeepQuotientExceptPublicInputsFunction::default().launch(&config, &args)
 }
 
+cuda_kernel!(
+    DeepQuotientPublicInput,
+    deep_quotient_public_input_kernel(
+        values: PtrAndStride<BF>,
+        expected_value: BF,
+        challenge: *const <ExtensionField as DeviceRepr>::Type,
+        quotient: MutPtrAndStride<<EF as DeviceRepr>::Type>,
+        count: u32,
+    )
+);
+
 pub fn deep_quotient_public_input(
-    values: &(impl DeviceVectorImpl<GoldilocksField> + ?Sized),
-    expected_value: GoldilocksField,
+    values: &(impl DeviceVectorImpl<BF> + ?Sized),
+    expected_value: BF,
     challenge: &(impl DeviceVectorImpl<ExtensionField> + ?Sized),
-    quotient: &mut (impl DeviceVectorMutImpl<VectorizedExtensionField> + ?Sized),
+    quotient: &mut (impl DeviceVectorMutImpl<EF> + ?Sized),
     stream: &CudaStream,
 ) -> CudaResult<()> {
     let count = values.slice().len();
@@ -1414,67 +1320,57 @@ pub fn deep_quotient_public_input(
     let quotient = quotient.as_mut_ptr_and_stride();
     let count = count as u32;
     let (grid_dim, block_dim) = get_launch_dims(count);
-    let mut args = kernel_args!(&values, &expected_value, &challenge, &quotient, &count,);
-    unsafe {
-        cudaLaunchKernel(
-            deep_quotient_public_input_kernel as *const _,
-            grid_dim,
-            block_dim,
-            args.as_mut_ptr(),
-            0,
-            stream.into(),
-        )
-        .wrap()
-    }
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args =
+        DeepQuotientPublicInputArguments::new(values, expected_value, challenge, quotient, count);
+    DeepQuotientPublicInputFunction::default().launch(&config, &args)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::alloc::Global;
-    use std::cmp::max;
-    use std::fmt::Debug;
-    use std::mem;
-
+    use super::*;
+    use crate::context::{Context, OMEGA_LOG_ORDER};
+    use crate::device_structures::{DeviceMatrix, DeviceMatrixMut};
+    use crate::extension_field::test_helpers::{transmute_gf_vec, ExtensionFieldTest};
+    use crate::extension_field::{convert, ExtensionField};
+    use crate::ops_cub::device_run_length_encode::{encode, get_encode_temp_storage_bytes};
+    use crate::ops_cub::device_scan::{get_scan_temp_storage_bytes, scan_in_place, ScanOperation};
+    use crate::ops_simple::set_to_zero;
     use boojum::cs::implementations::utils::{
         domain_generator_for_size, precompute_twiddles_for_fft,
     };
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::field::{Field, PrimeField};
     use boojum::worker::Worker;
-    use itertools::Itertools;
-    use rand::distributions::{Distribution, Uniform};
-    use rand::{thread_rng, Rng};
-    use serial_test::serial;
-
     use cudart::memory::{memory_copy_async, DeviceAllocation};
     use cudart::result::CudaResult;
     use cudart::slice::DeviceSlice;
     use cudart::stream::CudaStream;
-
-    use crate::context::{Context, OMEGA_LOG_ORDER};
-    use crate::device_structures::{DeviceMatrix, DeviceMatrixMut};
-    use crate::extension_field::test_helpers::{transmute_gf_vec, ExtensionFieldTest};
-    use crate::extension_field::{convert, ExtensionField, VectorizedExtensionField};
-    use crate::ops_cub::device_run_length_encode::{encode, get_encode_temp_storage_bytes};
-    use crate::ops_cub::device_scan::{get_scan_temp_storage_bytes, scan_in_place, ScanOperation};
-    use crate::ops_simple::set_to_zero;
+    use itertools::Itertools;
+    use rand::distributions::{Distribution, Uniform};
+    use rand::{thread_rng, Rng};
+    use serial_test::serial;
+    use std::alloc::Global;
+    use std::cmp::max;
+    use std::fmt::Debug;
+    use std::mem;
 
     fn assert_equal<T: PartialEq + Debug>((a, b): (T, T)) {
         assert_eq!(a, b);
     }
 
     type GetPowersOfWOrGDeviceFn =
-        fn(u32, u32, bool, bool, &mut DeviceSlice<GoldilocksField>, &CudaStream) -> CudaResult<()>;
+        fn(u32, u32, bool, bool, &mut DeviceSlice<BF>, &CudaStream) -> CudaResult<()>;
 
     fn test_get_powers_of_w_or_g(
         log_degree: u32,
         inverse: bool,
-        generator: GoldilocksField,
+        generator: BF,
         device_fn: GetPowersOfWOrGDeviceFn,
     ) {
         let n = 1 << log_degree;
         let context = Context::create(12, 12).unwrap();
-        let mut h_result = vec![GoldilocksField::ZERO; n];
+        let mut h_result = vec![BF::ZERO; n];
         let mut d_result = DeviceAllocation::alloc(n).unwrap();
         let stream = CudaStream::default();
         device_fn(
@@ -1529,8 +1425,7 @@ mod tests {
 
     fn test_get_powers_of_g(inverse: bool) {
         const LOG_DEGREE: u32 = 16;
-        let generator = GoldilocksField::multiplicative_generator()
-            .pow_u64(1 << (OMEGA_LOG_ORDER - LOG_DEGREE));
+        let generator = BF::multiplicative_generator().pow_u64(1 << (OMEGA_LOG_ORDER - LOG_DEGREE));
         test_get_powers_of_w_or_g(LOG_DEGREE, inverse, generator, super::get_powers_of_g);
     }
 
@@ -1548,7 +1443,7 @@ mod tests {
 
     fn test_get_powers_bf(by_val: bool) {
         const N: usize = 1 << 16;
-        let mut h_result = vec![GoldilocksField::ZERO; N];
+        let mut h_result = vec![BF::ZERO; N];
         let mut d_result = DeviceAllocation::alloc(N).unwrap();
         let stream = CudaStream::default();
         let base = GoldilocksField(42);
@@ -1557,11 +1452,11 @@ mod tests {
         let b = &d_base[0];
         let (d_result_0, d_result_1) = d_result.split_at_mut(N / 2);
         if by_val {
-            super::get_powers_by_val(base, 0, false, d_result_0, &stream).unwrap();
-            super::get_powers_by_val(base, N as u32 / 2, false, d_result_1, &stream).unwrap();
+            get_powers_by_val(base, 0, false, d_result_0, &stream).unwrap();
+            get_powers_by_val(base, N as u32 / 2, false, d_result_1, &stream).unwrap();
         } else {
-            super::get_powers_by_ref(b, 0, false, d_result_0, &stream).unwrap();
-            super::get_powers_by_ref(b, N as u32 / 2, false, d_result_1, &stream).unwrap();
+            get_powers_by_ref(b, 0, false, d_result_0, &stream).unwrap();
+            get_powers_by_ref(b, N as u32 / 2, false, d_result_1, &stream).unwrap();
         }
         memory_copy_async(&mut h_result, &d_result, &stream).unwrap();
         stream.synchronize().unwrap();
@@ -1584,10 +1479,8 @@ mod tests {
 
     fn test_get_powers_ef(by_val: bool) {
         const N: usize = 1 << 16;
-        let mut h_result_0 =
-            transmute_gf_vec::<VectorizedExtensionField>(vec![GoldilocksField::ZERO; N * 2]);
-        let mut h_result_1 =
-            transmute_gf_vec::<VectorizedExtensionField>(vec![GoldilocksField::ZERO; N * 2]);
+        let mut h_result_0 = transmute_gf_vec::<EF>(vec![BF::ZERO; N * 2]);
+        let mut h_result_1 = transmute_gf_vec::<EF>(vec![BF::ZERO; N * 2]);
         let mut d_result_0 = DeviceAllocation::alloc(N).unwrap();
         let mut d_result_1 = DeviceAllocation::alloc(N).unwrap();
         let stream = CudaStream::default();
@@ -1598,17 +1491,17 @@ mod tests {
         memory_copy_async(&mut d_base, &[base_vf], &stream).unwrap();
         let b = &d_base[0];
         if by_val {
-            super::get_powers_by_val(base_vf, 0, false, &mut d_result_0, &stream).unwrap();
-            super::get_powers_by_val(base_vf, N as u32, false, &mut d_result_1, &stream).unwrap();
+            get_powers_by_val(base_vf, 0, false, &mut d_result_0, &stream).unwrap();
+            get_powers_by_val(base_vf, N as u32, false, &mut d_result_1, &stream).unwrap();
         } else {
-            super::get_powers_by_ref(b, 0, false, &mut d_result_0, &stream).unwrap();
-            super::get_powers_by_ref(b, N as u32, false, &mut d_result_1, &stream).unwrap();
+            get_powers_by_ref(b, 0, false, &mut d_result_0, &stream).unwrap();
+            get_powers_by_ref(b, N as u32, false, &mut d_result_1, &stream).unwrap();
         }
         memory_copy_async(&mut h_result_0, &d_result_0, &stream).unwrap();
         memory_copy_async(&mut h_result_1, &d_result_1, &stream).unwrap();
         stream.synchronize().unwrap();
-        let i_0 = VectorizedExtensionField::get_iterator(&h_result_0);
-        let i_1 = VectorizedExtensionField::get_iterator(&h_result_1);
+        let i_0 = EF::get_iterator(&h_result_0);
+        let i_1 = EF::get_iterator(&h_result_1);
         i_0.chain(i_1)
             .enumerate()
             .map(|(i, x)| (base_ef.pow_u64(i as u64), x))
@@ -1630,12 +1523,12 @@ mod tests {
         const N: usize = 1 << LOG_DEGREE;
         const SHIFT: u32 = 42;
         let context = Context::create(12, 12).unwrap();
-        let h_src = Uniform::new(0, GoldilocksField::ORDER)
+        let h_src = Uniform::new(0, BF::ORDER)
             .sample_iter(&mut thread_rng())
             .take(N)
             .map(GoldilocksField)
             .collect_vec();
-        let mut h_dst = vec![GoldilocksField::ZERO; N];
+        let mut h_dst = vec![BF::ZERO; N];
         let stream = CudaStream::default();
         if in_place {
             let mut d_values = DeviceAllocation::alloc(N).unwrap();
@@ -1686,7 +1579,7 @@ mod tests {
             memory_copy_async(&mut h_dst, &d_dst, &stream).unwrap();
         }
         stream.synchronize().unwrap();
-        let mut generator: GoldilocksField = domain_generator_for_size((1 << LOG_DEGREE) as u64);
+        let mut generator: BF = domain_generator_for_size((1 << LOG_DEGREE) as u64);
         if inverse {
             generator = generator.inverse().unwrap();
         }
@@ -1728,12 +1621,12 @@ mod tests {
         const ROWS: usize = 1 << LOG_ROWS;
         const COLS: usize = 16;
         const N: usize = COLS << LOG_ROWS;
-        let h_src = Uniform::new(0, GoldilocksField::ORDER)
+        let h_src = Uniform::new(0, BF::ORDER)
             .sample_iter(&mut thread_rng())
             .take(N)
             .map(GoldilocksField)
             .collect_vec();
-        let mut h_dst = vec![GoldilocksField::ZERO; N];
+        let mut h_dst = vec![BF::ZERO; N];
         let stream = CudaStream::default();
         if in_place {
             let mut d_values = DeviceAllocation::alloc(N).unwrap();
@@ -1778,23 +1671,23 @@ mod tests {
     fn test_batch_inv_bf(in_place: bool) {
         const LOG_N: usize = 16;
         const N: usize = 1 << LOG_N;
-        let h_src = Uniform::new(0, GoldilocksField::ORDER)
+        let h_src = Uniform::new(0, BF::ORDER)
             .sample_iter(&mut thread_rng())
             .take(N)
             .map(GoldilocksField)
             .collect_vec();
-        let mut h_dst = vec![GoldilocksField::ZERO; N];
+        let mut h_dst = vec![BF::ZERO; N];
         let stream = CudaStream::default();
         if in_place {
             let mut d_values = DeviceAllocation::alloc(N).unwrap();
             memory_copy_async(&mut d_values, &h_src, &stream).unwrap();
-            super::batch_inv_in_place::<GoldilocksField>(&mut d_values, &stream).unwrap();
+            batch_inv_in_place::<BF>(&mut d_values, &stream).unwrap();
             memory_copy_async(&mut h_dst, &d_values, &stream).unwrap();
         } else {
             let mut d_src = DeviceAllocation::alloc(N).unwrap();
             let mut d_dst = DeviceAllocation::alloc(N).unwrap();
             memory_copy_async(&mut d_src, &h_src, &stream).unwrap();
-            super::batch_inv::<GoldilocksField>(&d_src, &mut d_dst, &stream).unwrap();
+            batch_inv::<BF>(&d_src, &mut d_dst, &stream).unwrap();
             memory_copy_async(&mut h_dst, &d_dst, &stream).unwrap();
         }
         stream.synchronize().unwrap();
@@ -1816,29 +1709,28 @@ mod tests {
     }
 
     fn test_batch_inv_ef(in_place: bool) {
-        type Vef = VectorizedExtensionField;
         const LOG_N: usize = 16;
         const N: usize = 1 << LOG_N;
-        let h_src_bf = Uniform::new(0, GoldilocksField::ORDER)
+        let h_src_bf = Uniform::new(0, BF::ORDER)
             .sample_iter(&mut thread_rng())
             .take(2 * N)
             .map(GoldilocksField)
             .collect_vec();
-        let mut h_dst_bf = vec![GoldilocksField::ZERO; 2 * N];
+        let mut h_dst_bf = vec![BF::ZERO; 2 * N];
         let stream = CudaStream::default();
         if in_place {
             let mut d_values_bf = DeviceAllocation::alloc(2 * N).unwrap();
             memory_copy_async(&mut d_values_bf, &h_src_bf, &stream).unwrap();
-            let d_values_ef = unsafe { d_values_bf.transmute_mut::<Vef>() };
-            super::batch_inv_in_place::<Vef>(d_values_ef, &stream).unwrap();
+            let d_values_ef = unsafe { d_values_bf.transmute_mut::<EF>() };
+            batch_inv_in_place::<EF>(d_values_ef, &stream).unwrap();
             memory_copy_async(&mut h_dst_bf, &d_values_bf, &stream).unwrap();
         } else {
             let mut d_src_bf = DeviceAllocation::alloc(2 * N).unwrap();
             let mut d_dst_bf = DeviceAllocation::alloc(2 * N).unwrap();
             memory_copy_async(&mut d_src_bf, &h_src_bf, &stream).unwrap();
-            let d_src_ef = unsafe { d_src_bf.transmute::<Vef>() };
-            let d_dst_ef = unsafe { d_dst_bf.transmute_mut::<Vef>() };
-            super::batch_inv::<Vef>(d_src_ef, d_dst_ef, &stream).unwrap();
+            let d_src_ef = unsafe { d_src_bf.transmute::<EF>() };
+            let d_dst_ef = unsafe { d_dst_bf.transmute_mut::<EF>() };
+            batch_inv::<EF>(d_src_ef, d_dst_ef, &stream).unwrap();
             memory_copy_async(&mut h_dst_bf, &d_dst_bf, &stream).unwrap();
         }
         stream.synchronize().unwrap();
@@ -1867,48 +1759,6 @@ mod tests {
     }
 
     #[test]
-    fn select() {
-        const LOG_N: usize = 16;
-        const N: usize = 1 << LOG_N;
-        const PLACEHOLDER: u32 = 1 << 31;
-        let h_indexes = (0..N)
-            .map(|i| {
-                if i == 0 {
-                    PLACEHOLDER
-                } else {
-                    (i.reverse_bits() >> (usize::BITS - LOG_N as u32)) as u32
-                }
-            })
-            .collect_vec();
-        let h_src = Uniform::new(0, GoldilocksField::ORDER)
-            .sample_iter(&mut thread_rng())
-            .take(N)
-            .map(GoldilocksField)
-            .collect_vec();
-        let mut h_dst = vec![GoldilocksField::ZERO; N];
-        let mut d_indexes = DeviceAllocation::alloc(N).unwrap();
-        let mut d_src = DeviceAllocation::alloc(N).unwrap();
-        let mut d_dst = DeviceAllocation::alloc(N).unwrap();
-        let stream = CudaStream::default();
-        memory_copy_async(&mut d_indexes, &h_indexes, &stream).unwrap();
-        memory_copy_async(&mut d_src, &h_src, &stream).unwrap();
-        super::select(&d_indexes, &d_src, &mut d_dst, &stream).unwrap();
-        memory_copy_async(&mut h_dst, &d_dst, &stream).unwrap();
-        stream.synchronize().unwrap();
-        h_indexes
-            .into_iter()
-            .map(|i| {
-                if i == PLACEHOLDER {
-                    GoldilocksField::ZERO
-                } else {
-                    h_src[i as usize]
-                }
-            })
-            .zip(h_dst)
-            .for_each(assert_equal);
-    }
-
-    #[test]
     fn pack_variable_indexes() {
         const LOG_N: usize = 16;
         const N: usize = 1 << LOG_N;
@@ -1929,6 +1779,48 @@ mod tests {
         h_src
             .into_iter()
             .map(|x| if x == (1 << 63) { 1 << 31 } else { x as u32 })
+            .zip(h_dst)
+            .for_each(assert_equal);
+    }
+
+    #[test]
+    fn select() {
+        const LOG_N: usize = 16;
+        const N: usize = 1 << LOG_N;
+        const PLACEHOLDER: u32 = 1 << 31;
+        let h_indexes = (0..N)
+            .map(|i| {
+                if i == 0 {
+                    PLACEHOLDER
+                } else {
+                    (i.reverse_bits() >> (usize::BITS - LOG_N as u32)) as u32
+                }
+            })
+            .collect_vec();
+        let h_src = Uniform::new(0, BF::ORDER)
+            .sample_iter(&mut thread_rng())
+            .take(N)
+            .map(GoldilocksField)
+            .collect_vec();
+        let mut h_dst = vec![BF::ZERO; N];
+        let mut d_indexes = DeviceAllocation::alloc(N).unwrap();
+        let mut d_src = DeviceAllocation::alloc(N).unwrap();
+        let mut d_dst = DeviceAllocation::alloc(N).unwrap();
+        let stream = CudaStream::default();
+        memory_copy_async(&mut d_indexes, &h_indexes, &stream).unwrap();
+        memory_copy_async(&mut d_src, &h_src, &stream).unwrap();
+        super::select(&d_indexes, &d_src, &mut d_dst, &stream).unwrap();
+        memory_copy_async(&mut h_dst, &d_dst, &stream).unwrap();
+        stream.synchronize().unwrap();
+        h_indexes
+            .into_iter()
+            .map(|i| {
+                if i == PLACEHOLDER {
+                    BF::ZERO
+                } else {
+                    h_src[i as usize]
+                }
+            })
             .zip(h_dst)
             .for_each(assert_equal);
     }
@@ -2005,19 +1897,19 @@ mod tests {
             .map(|i| (i % RANGE_MAX) as u32)
             .map(|i| if i == 0 { PLACEHOLDER } else { i })
             .collect_vec();
-        let h_scalars = Uniform::new(0, GoldilocksField::ORDER)
+        let h_scalars = Uniform::new(0, BF::ORDER)
             .sample_iter(&mut thread_rng())
             .take(NUM_COLS)
             .map(GoldilocksField)
             .collect_vec();
-        let mut h_permutation_matrix = vec![GoldilocksField::ZERO; NUM_CELLS];
-        let mut h_twiddles = vec![GoldilocksField::ZERO; NUM_ROWS];
+        let mut h_permutation_matrix = vec![BF::ZERO; NUM_CELLS];
+        let mut h_twiddles = vec![BF::ZERO; NUM_ROWS];
         let mut d_variable_indexes = DeviceAllocation::alloc(NUM_CELLS).unwrap();
         let mut d_scalars = DeviceAllocation::alloc(NUM_COLS).unwrap();
         let mut d_permutation_matrix = DeviceAllocation::alloc(NUM_CELLS).unwrap();
         let mut d_twiddles = DeviceAllocation::alloc(NUM_ROWS).unwrap();
         let temp_storage_bytes =
-            super::get_generate_permutation_matrix_temp_storage_bytes(NUM_CELLS).unwrap();
+            get_generate_permutation_matrix_temp_storage_bytes(NUM_CELLS).unwrap();
         let mut d_temp_storage = DeviceAllocation::alloc(temp_storage_bytes).unwrap();
         let stream = CudaStream::default();
         memory_copy_async(&mut d_variable_indexes, &h_variable_indexes, &stream).unwrap();
@@ -2069,7 +1961,7 @@ mod tests {
         const PACKED_N: usize = N / u32::BITS as usize;
         let rng = &mut thread_rng();
         let h_packed_bits = (0..PACKED_N).map(|_| rng.gen()).collect_vec();
-        let mut h_result = vec![GoldilocksField::ZERO; N];
+        let mut h_result = vec![BF::ZERO; N];
         let mut d_packed_bits = DeviceAllocation::alloc(PACKED_N).unwrap();
         let mut d_result = DeviceAllocation::alloc(N).unwrap();
         let stream = CudaStream::default();
@@ -2080,13 +1972,7 @@ mod tests {
         h_packed_bits
             .into_iter()
             .flat_map(|word| (0..u32::BITS).map(move |i| (word >> i) & 1))
-            .map(|bit| {
-                if bit == 1 {
-                    GoldilocksField::ONE
-                } else {
-                    GoldilocksField::ZERO
-                }
-            })
+            .map(|bit| if bit == 1 { BF::ONE } else { BF::ZERO })
             .zip(h_result)
             .for_each(assert_equal);
     }
@@ -2098,12 +1984,12 @@ mod tests {
         const N: usize = 1 << LOG_N;
         let context = Context::create(12, 12).unwrap();
         let worker = Worker::new_with_num_threads(1);
-        type F = GoldilocksField;
+        type F = BF;
         let roots = precompute_twiddles_for_fft::<F, F, Global, true>(N * 2, &worker, &mut ());
         let coset_inverse = <F as PrimeField>::multiplicative_generator()
             .inverse()
             .unwrap();
-        let uniform = Uniform::new(0, GoldilocksField::ORDER);
+        let uniform = Uniform::new(0, BF::ORDER);
         let mut rng = thread_rng();
         let h_src = uniform
             .sample_iter(&mut rng)

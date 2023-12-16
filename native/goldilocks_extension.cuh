@@ -91,6 +91,18 @@ struct __align__(16) extension_field {
     }
     return result;
   }
+
+  static DEVICE_FORCEINLINE extension_field shr(const extension_field &x, const unsigned &shift) {
+    auto a = base_field::shr(x[0], shift);
+    auto b = base_field::shr(x[1], shift);
+    return {a, b};
+  }
+
+  static DEVICE_FORCEINLINE extension_field shl(const extension_field &x, const unsigned &shift) {
+    auto a = base_field::shl(x[0], shift);
+    auto b = base_field::shl(x[1], shift);
+    return {a, b};
+  }
 };
 
 template <memory::ld_modifier LD_MODIFIER = memory::ld_modifier::none>

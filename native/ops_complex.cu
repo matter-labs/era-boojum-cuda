@@ -173,8 +173,7 @@ template <> struct InvBatch<extension_field> {
   static constexpr unsigned INV_BATCH = 6;
 };
 
-template<typename T, typename GETTER, typename SETTER>
-DEVICE_FORCEINLINE void batch_inv_impl(GETTER src, SETTER dst, const unsigned count) {
+template <typename T, typename GETTER, typename SETTER> DEVICE_FORCEINLINE void batch_inv_impl(GETTER src, SETTER dst, const unsigned count) {
   constexpr unsigned INV_BATCH = InvBatch<T>::INV_BATCH;
 
   // ints for indexing because some bounds checks count down and check if an index drops below 0
@@ -216,8 +215,7 @@ EXTERN __global__ void batch_inv_bf_kernel(vector_getter<base_field, ld_modifier
   batch_inv_impl<base_field>(src, dst, count);
 }
 
-EXTERN __global__ void batch_inv_ef_kernel(ef_double_vector_getter<ld_modifier::cs> src, ef_double_vector_setter<st_modifier::cs> dst,
-                                           const unsigned count) {
+EXTERN __global__ void batch_inv_ef_kernel(ef_double_vector_getter<ld_modifier::cs> src, ef_double_vector_setter<st_modifier::cs> dst, const unsigned count) {
   batch_inv_impl<extension_field>(src, dst, count);
 }
 

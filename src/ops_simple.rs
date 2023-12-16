@@ -1,330 +1,53 @@
-use cudart::execution::{KernelFourArgs, KernelLaunch, KernelThreeArgs, KernelTwoArgs};
-use cudart::memory::memory_set_async;
-use cudart::result::CudaResult;
-use cudart::slice::DeviceSlice;
-use cudart::stream::CudaStream;
-use cudart_sys::dim3;
-
 use crate::device_structures::{
-    BaseFieldDeviceType, DeviceMatrixChunkImpl, DeviceMatrixChunkMutImpl, DeviceRepr,
-    MutPtrAndStrideWrappingMatrix, PtrAndStrideWrappingMatrix, U32DeviceType, U64DeviceType,
-    VectorizedExtensionFieldDeviceType,
+    DeviceMatrixChunkImpl, DeviceMatrixChunkMutImpl, DeviceRepr, MutPtrAndStrideWrappingMatrix,
+    PtrAndStrideWrappingMatrix,
 };
 use crate::extension_field::VectorizedExtensionField;
 use crate::utils::{get_grid_block_dims_for_threads_count, WARP_SIZE};
 use crate::BaseField;
+use cudart::execution::{CudaLaunchConfig, Dim3, KernelFunction};
+use cudart::memory::memory_set_async;
+use cudart::paste::paste;
+use cudart::result::CudaResult;
+use cudart::slice::DeviceSlice;
+use cudart::stream::CudaStream;
+use cudart::{cuda_kernel_declaration, cuda_kernel_signature_arguments_and_function};
 
-extern "C" {
-    fn set_by_val_bf_kernel(
-        value: BaseField,
-        result: MutPtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-    );
-
-    fn set_by_val_ef_kernel(
-        value: VectorizedExtensionField,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn set_by_val_u32_kernel(value: u32, result: MutPtrAndStrideWrappingMatrix<U32DeviceType>);
-
-    fn set_by_val_u64_kernel(value: u64, result: MutPtrAndStrideWrappingMatrix<U64DeviceType>);
-
-    fn set_by_ref_bf_kernel(
-        values: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-    );
-
-    fn set_by_ref_ef_kernel(
-        values: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn set_by_ref_u32_kernel(
-        values: PtrAndStrideWrappingMatrix<U32DeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<U32DeviceType>,
-    );
-
-    fn set_by_ref_u64_kernel(
-        values: PtrAndStrideWrappingMatrix<U64DeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<U64DeviceType>,
-    );
-
-    fn dbl_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-    );
-
-    fn dbl_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn inv_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-    );
-
-    fn inv_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn neg_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-    );
-
-    fn neg_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn sqr_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-    );
-
-    fn sqr_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn shr_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        shift: u32,
-        result: MutPtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-    );
-
-    fn shl_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        shift: u32,
-        result: MutPtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-    );
-
-    fn pow_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        exponent: u32,
-        result: MutPtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-    );
-
-    fn pow_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        exponent: u32,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn add_bf_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-    );
-
-    fn add_bf_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn add_ef_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn add_ef_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_bf_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-    );
-
-    fn mul_bf_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_ef_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_ef_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn sub_bf_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-    );
-
-    fn sub_bf_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn sub_ef_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn sub_ef_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_add_bf_bf_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-    );
-
-    fn mul_add_bf_bf_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_add_bf_ef_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_add_bf_ef_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_add_ef_bf_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_add_ef_bf_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_add_ef_ef_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_add_ef_ef_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_sub_bf_bf_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-    );
-
-    fn mul_sub_bf_bf_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_sub_bf_ef_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_sub_bf_ef_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_sub_ef_bf_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_sub_ef_bf_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_sub_ef_ef_bf_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<BaseFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-
-    fn mul_sub_ef_ef_ef_kernel(
-        x: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        y: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        z: PtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-        result: MutPtrAndStrideWrappingMatrix<VectorizedExtensionFieldDeviceType>,
-    );
-}
+type BF = BaseField;
+type EF = VectorizedExtensionField;
 
 pub fn set_to_zero<T>(result: &mut DeviceSlice<T>, stream: &CudaStream) -> CudaResult<()> {
     memory_set_async(unsafe { result.transmute_mut() }, 0, stream)
 }
 
-fn get_launch_dims(rows: u32, cols: u32) -> (dim3, dim3) {
+fn get_launch_dims(rows: u32, cols: u32) -> (Dim3, Dim3) {
     let (mut grid_dim, block_dim) = get_grid_block_dims_for_threads_count(WARP_SIZE * 4, rows);
     grid_dim.y = cols;
     (grid_dim, block_dim)
 }
 
-pub type SetByValKernel<T> =
-    KernelTwoArgs<T, MutPtrAndStrideWrappingMatrix<<T as DeviceRepr>::Type>>;
+// SET_BY_VAL_KERNEL
+cuda_kernel_signature_arguments_and_function!(
+    SetByVal<T: DeviceRepr>,
+    value: T,
+    result: MutPtrAndStrideWrappingMatrix<<T as DeviceRepr>::Type>,
+);
 
-pub trait SetByVal: Sized + DeviceRepr {
-    fn get_kernel() -> SetByValKernel<Self>;
+macro_rules! set_by_val_kernel {
+    ($type:ty) => {
+        paste! {
+            cuda_kernel_declaration!(
+                [<set_by_val_ $type:lower _kernel>](
+                    value: $type,
+                    result: MutPtrAndStrideWrappingMatrix<<$type as DeviceRepr>::Type>,
+                )
+            );
+        }
+    };
+}
 
-    fn launch(
-        value: Self,
-        result: &mut (impl DeviceMatrixChunkMutImpl<Self> + ?Sized),
-        stream: &CudaStream,
-    ) -> CudaResult<()> {
-        let result = MutPtrAndStrideWrappingMatrix::new(result);
-        let kernel = Self::get_kernel();
-        let (grid_dim, block_dim) = get_launch_dims(result.rows, result.cols);
-        let args = (&value, &result);
-        unsafe { kernel.launch(grid_dim, block_dim, args, 0, stream) }
-    }
+pub trait SetByVal: DeviceRepr {
+    const KERNEL_FUNCTION: SetByValSignature<Self>;
 }
 
 pub fn set_by_val<T: SetByVal>(
@@ -332,55 +55,51 @@ pub fn set_by_val<T: SetByVal>(
     result: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
     stream: &CudaStream,
 ) -> CudaResult<()> {
-    T::launch(value, result, stream)
+    let result = MutPtrAndStrideWrappingMatrix::new(result);
+    let (grid_dim, block_dim) = get_launch_dims(result.rows, result.cols);
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = SetByValArguments::new(value, result);
+    SetByValFunction(T::KERNEL_FUNCTION).launch(&config, &args)
 }
 
-impl SetByVal for u32 {
-    fn get_kernel() -> SetByValKernel<Self> {
-        set_by_val_u32_kernel
-    }
+macro_rules! set_by_val_impl {
+    ($type:ty) => {
+        paste! {
+            set_by_val_kernel!($type);
+            impl SetByVal for $type {
+                const KERNEL_FUNCTION: SetByValSignature<Self> = [<set_by_val_ $type:lower _kernel>];
+            }
+        }
+    };
 }
 
-impl SetByVal for u64 {
-    fn get_kernel() -> SetByValKernel<Self> {
-        set_by_val_u64_kernel
-    }
+set_by_val_impl!(u32);
+set_by_val_impl!(u64);
+set_by_val_impl!(BF);
+set_by_val_impl!(EF);
+
+// SET_BY_REF_KERNEL
+cuda_kernel_signature_arguments_and_function!(
+    SetByRef<T: DeviceRepr>,
+    values: PtrAndStrideWrappingMatrix<<T as DeviceRepr>::Type>,
+    result: MutPtrAndStrideWrappingMatrix<<T as DeviceRepr>::Type>,
+);
+
+macro_rules! set_by_ref_kernel {
+    ($type:ty) => {
+        paste! {
+            cuda_kernel_declaration!(
+                [<set_by_ref_ $type:lower _kernel>](
+                    values: PtrAndStrideWrappingMatrix<<$type as DeviceRepr>::Type>,
+                    result: MutPtrAndStrideWrappingMatrix<<$type as DeviceRepr>::Type>,
+                )
+            );
+        }
+    };
 }
 
-impl SetByVal for BaseField {
-    fn get_kernel() -> SetByValKernel<Self> {
-        set_by_val_bf_kernel
-    }
-}
-
-impl SetByVal for VectorizedExtensionField {
-    fn get_kernel() -> SetByValKernel<Self> {
-        set_by_val_ef_kernel
-    }
-}
-
-pub type SetByRefKernel<T> = KernelTwoArgs<
-    PtrAndStrideWrappingMatrix<<T as DeviceRepr>::Type>,
-    MutPtrAndStrideWrappingMatrix<<T as DeviceRepr>::Type>,
->;
-
-pub trait SetByRef: Sized + DeviceRepr {
-    fn get_kernel() -> SetByRefKernel<Self>;
-
-    fn launch(
-        values: &(impl DeviceMatrixChunkImpl<Self> + ?Sized),
-        result: &mut (impl DeviceMatrixChunkMutImpl<Self> + ?Sized),
-        stream: &CudaStream,
-    ) -> CudaResult<()> {
-        assert_eq!(result.rows() % values.rows(), 0);
-        assert_eq!(result.cols() % values.cols(), 0);
-        let values = PtrAndStrideWrappingMatrix::new(values);
-        let result = MutPtrAndStrideWrappingMatrix::new(result);
-        let kernel = Self::get_kernel();
-        let (grid_dim, block_dim) = get_launch_dims(result.rows, result.cols);
-        let args = (&values, &result);
-        unsafe { kernel.launch(grid_dim, block_dim, args, 0, stream) }
-    }
+pub trait SetByRef: DeviceRepr {
+    const KERNEL_FUNCTION: SetByRefSignature<Self>;
 }
 
 pub fn set_by_ref<T: SetByRef>(
@@ -388,229 +107,186 @@ pub fn set_by_ref<T: SetByRef>(
     result: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
     stream: &CudaStream,
 ) -> CudaResult<()> {
-    T::launch(values, result, stream)
+    let values = PtrAndStrideWrappingMatrix::new(values);
+    let result = MutPtrAndStrideWrappingMatrix::new(result);
+    let (grid_dim, block_dim) = get_launch_dims(result.rows, result.cols);
+    let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+    let args = SetByRefArguments::<T>::new(values, result);
+    SetByRefFunction::<T>(T::KERNEL_FUNCTION).launch(&config, &args)
 }
 
-impl SetByRef for u32 {
-    fn get_kernel() -> SetByRefKernel<Self> {
-        set_by_ref_u32_kernel
-    }
+macro_rules! set_by_ref_impl {
+    ($type:ty) => {
+        paste! {
+            set_by_ref_kernel!($type);
+            impl SetByRef for $type {
+                const KERNEL_FUNCTION: SetByRefSignature<Self> = [<set_by_ref_ $type:lower _kernel>];
+            }
+        }
+    };
 }
 
-impl SetByRef for u64 {
-    fn get_kernel() -> SetByRefKernel<Self> {
-        set_by_ref_u64_kernel
-    }
+set_by_ref_impl!(u32);
+set_by_ref_impl!(u64);
+set_by_ref_impl!(BF);
+set_by_ref_impl!(EF);
+
+// UNARY_KERNEL
+cuda_kernel_signature_arguments_and_function!(
+    UnaryOp<T: DeviceRepr>,
+    values: PtrAndStrideWrappingMatrix<<T as DeviceRepr>::Type>,
+    result: MutPtrAndStrideWrappingMatrix<<T as DeviceRepr>::Type>,
+);
+
+macro_rules! unary_op_kernel {
+    ($op:ty, $type:ty) => {
+        paste! {
+            cuda_kernel_declaration!(
+                [<$op:lower _ $type:lower _kernel>](
+                    values: PtrAndStrideWrappingMatrix<<$type as DeviceRepr>::Type>,
+                    result: MutPtrAndStrideWrappingMatrix<<$type as DeviceRepr>::Type>,
+                )
+            );
+        }
+    };
 }
 
-impl SetByRef for BaseField {
-    fn get_kernel() -> SetByRefKernel<Self> {
-        set_by_ref_bf_kernel
-    }
-}
-
-impl SetByRef for VectorizedExtensionField {
-    fn get_kernel() -> SetByRefKernel<Self> {
-        set_by_ref_ef_kernel
-    }
-}
-
-pub enum UnaryOpType {
-    Dbl,
-    Inv,
-    Neg,
-    Sqr,
-}
-
-type UnaryKernel<T0, TR> = KernelTwoArgs<
-    PtrAndStrideWrappingMatrix<<T0 as DeviceRepr>::Type>,
-    MutPtrAndStrideWrappingMatrix<<TR as DeviceRepr>::Type>,
->;
-
-pub trait UnaryOp: Sized + DeviceRepr {
-    fn get_kernel(op_type: UnaryOpType) -> UnaryKernel<Self, Self>;
+pub trait UnaryOp<T: DeviceRepr> {
+    const KERNEL_FUNCTION: UnaryOpSignature<T>;
 
     fn launch_op(
-        op_type: UnaryOpType,
-        x: PtrAndStrideWrappingMatrix<Self::Type>,
-        result: MutPtrAndStrideWrappingMatrix<Self::Type>,
+        values: PtrAndStrideWrappingMatrix<T::Type>,
+        result: MutPtrAndStrideWrappingMatrix<T::Type>,
         stream: &CudaStream,
     ) -> CudaResult<()> {
-        let kernel = Self::get_kernel(op_type);
         let (grid_dim, block_dim) = get_launch_dims(result.rows, result.cols);
-        let args = (&x, &result);
-        unsafe { kernel.launch(grid_dim, block_dim, args, 0, stream) }
+        let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+        let args = UnaryOpArguments::<T>::new(values, result);
+        UnaryOpFunction::<T>(Self::KERNEL_FUNCTION).launch(&config, &args)
     }
 
     fn launch(
-        op_type: UnaryOpType,
-        x: &(impl DeviceMatrixChunkImpl<Self> + ?Sized),
-        result: &mut (impl DeviceMatrixChunkMutImpl<Self> + ?Sized),
+        values: &(impl DeviceMatrixChunkImpl<T> + ?Sized),
+        result: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
         stream: &CudaStream,
     ) -> CudaResult<()> {
-        assert_eq!(result.rows() % x.rows(), 0);
-        assert_eq!(result.cols() % x.cols(), 0);
+        assert_eq!(result.rows() % values.rows(), 0);
+        assert_eq!(result.cols() % values.cols(), 0);
         Self::launch_op(
-            op_type,
-            PtrAndStrideWrappingMatrix::new(x),
+            PtrAndStrideWrappingMatrix::new(values),
             MutPtrAndStrideWrappingMatrix::new(result),
             stream,
         )
     }
 
     fn launch_in_place(
-        op_type: UnaryOpType,
-        x: &mut (impl DeviceMatrixChunkMutImpl<Self> + ?Sized),
+        values: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
         stream: &CudaStream,
     ) -> CudaResult<()> {
         Self::launch_op(
-            op_type,
-            PtrAndStrideWrappingMatrix::new(x),
-            MutPtrAndStrideWrappingMatrix::new(x),
+            PtrAndStrideWrappingMatrix::new(values),
+            MutPtrAndStrideWrappingMatrix::new(values),
             stream,
         )
     }
 }
 
-impl UnaryOp for BaseField {
-    fn get_kernel(op_type: UnaryOpType) -> UnaryKernel<Self, Self> {
-        match op_type {
-            UnaryOpType::Dbl => dbl_bf_kernel,
-            UnaryOpType::Inv => inv_bf_kernel,
-            UnaryOpType::Neg => neg_bf_kernel,
-            UnaryOpType::Sqr => sqr_bf_kernel,
+macro_rules! unary_op_def {
+    ($op:ty) => {
+        paste! {
+            pub struct $op;
+            pub fn [<$op:lower>]<T: DeviceRepr>(
+                values: &(impl DeviceMatrixChunkImpl<T> + ?Sized),
+                result: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
+                stream: &CudaStream,
+            ) -> CudaResult<()> where $op: UnaryOp<T> {
+                $op::launch(values, result, stream)
+            }
+            pub fn [<$op:lower _in_place>]<T: DeviceRepr>(
+                values: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
+                stream: &CudaStream,
+            ) -> CudaResult<()>  where $op: UnaryOp<T> {
+                $op::launch_in_place(values, stream)
+            }
         }
-    }
+    };
 }
 
-impl UnaryOp for VectorizedExtensionField {
-    fn get_kernel(op_type: UnaryOpType) -> UnaryKernel<Self, Self> {
-        match op_type {
-            UnaryOpType::Dbl => dbl_ef_kernel,
-            UnaryOpType::Inv => inv_ef_kernel,
-            UnaryOpType::Neg => neg_ef_kernel,
-            UnaryOpType::Sqr => sqr_ef_kernel,
+unary_op_def!(Dbl);
+unary_op_def!(Inv);
+unary_op_def!(Neg);
+unary_op_def!(Sqr);
+
+macro_rules! unary_op_impl {
+    ($op:ty, $type:ty) => {
+        paste! {
+            unary_op_kernel!($op, $type);
+            impl UnaryOp<$type> for $op {
+                const KERNEL_FUNCTION: UnaryOpSignature<$type> = [<$op:lower _ $type:lower _kernel>];
+            }
         }
-    }
+    };
 }
 
-fn unary_op<T: UnaryOp>(
-    op_type: UnaryOpType,
-    x: &(impl DeviceMatrixChunkImpl<T> + ?Sized),
-    result: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    T::launch(op_type, x, result, stream)
+macro_rules! unary_ops_impl {
+    ($type:ty) => {
+        unary_op_impl!(Dbl, $type);
+        unary_op_impl!(Inv, $type);
+        unary_op_impl!(Neg, $type);
+        unary_op_impl!(Sqr, $type);
+    };
 }
 
-fn unary_op_in_place<T: UnaryOp>(
-    op_type: UnaryOpType,
-    x: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    T::launch_in_place(op_type, x, stream)
+unary_ops_impl!(BF);
+unary_ops_impl!(EF);
+
+// PARAMETRIZED_KERNEL
+cuda_kernel_signature_arguments_and_function!(
+    ParametrizedOp<T: DeviceRepr>,
+    values: PtrAndStrideWrappingMatrix<<T as DeviceRepr>::Type>,
+    param: u32,
+    result: MutPtrAndStrideWrappingMatrix<<T as DeviceRepr>::Type>,
+);
+
+macro_rules! parametrized_op_kernel {
+    ($op:ty, $type:ty) => {
+        paste! {
+            cuda_kernel_declaration!(
+                [<$op:lower _ $type:lower _kernel>](
+                    values: PtrAndStrideWrappingMatrix<<$type as DeviceRepr>::Type>,
+                    param: u32,
+                    result: MutPtrAndStrideWrappingMatrix<<$type as DeviceRepr>::Type>,
+                )
+            );
+        }
+    };
 }
 
-pub fn dbl<T: UnaryOp>(
-    x: &(impl DeviceMatrixChunkImpl<T> + ?Sized),
-    result: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    unary_op(UnaryOpType::Dbl, x, result, stream)
-}
-
-pub fn dbl_in_place<T: UnaryOp>(
-    x: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    unary_op_in_place(UnaryOpType::Dbl, x, stream)
-}
-
-pub fn inv<T: UnaryOp>(
-    x: &(impl DeviceMatrixChunkImpl<T> + ?Sized),
-    result: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    unary_op(UnaryOpType::Inv, x, result, stream)
-}
-
-pub fn inv_in_place<T: UnaryOp>(
-    x: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    unary_op_in_place(UnaryOpType::Inv, x, stream)
-}
-
-pub fn neg<T: UnaryOp>(
-    x: &(impl DeviceMatrixChunkImpl<T> + ?Sized),
-    result: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    unary_op(UnaryOpType::Neg, x, result, stream)
-}
-
-pub fn neg_in_place<T: UnaryOp>(
-    x: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    unary_op_in_place(UnaryOpType::Neg, x, stream)
-}
-
-pub fn sqr<T: UnaryOp>(
-    x: &(impl DeviceMatrixChunkImpl<T> + ?Sized),
-    result: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    unary_op(UnaryOpType::Sqr, x, result, stream)
-}
-
-pub fn sqr_in_place<T: UnaryOp>(
-    x: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    unary_op_in_place(UnaryOpType::Sqr, x, stream)
-}
-
-pub enum ParametrizedUnaryOpType {
-    Pow,
-    Shl,
-    Shr,
-}
-
-type ParametrizedUnaryKernel<T0, TR> = KernelThreeArgs<
-    PtrAndStrideWrappingMatrix<<T0 as DeviceRepr>::Type>,
-    u32,
-    MutPtrAndStrideWrappingMatrix<<TR as DeviceRepr>::Type>,
->;
-
-pub trait ParametrizedUnaryOp: Sized + DeviceRepr {
-    fn get_kernel(op_type: ParametrizedUnaryOpType) -> ParametrizedUnaryKernel<Self, Self>;
+pub trait ParametrizedOp<T: DeviceRepr> {
+    const KERNEL_FUNCTION: ParametrizedOpSignature<T>;
 
     fn launch_op(
-        op_type: ParametrizedUnaryOpType,
-        x: PtrAndStrideWrappingMatrix<Self::Type>,
+        values: PtrAndStrideWrappingMatrix<T::Type>,
         param: u32,
-        result: MutPtrAndStrideWrappingMatrix<Self::Type>,
+        result: MutPtrAndStrideWrappingMatrix<T::Type>,
         stream: &CudaStream,
     ) -> CudaResult<()> {
-        let kernel = Self::get_kernel(op_type);
         let (grid_dim, block_dim) = get_launch_dims(result.rows, result.cols);
-        let args = (&x, &param, &result);
-        unsafe { kernel.launch(grid_dim, block_dim, args, 0, stream) }
+        let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+        let args = ParametrizedOpArguments::<T>::new(values, param, result);
+        ParametrizedOpFunction::<T>(Self::KERNEL_FUNCTION).launch(&config, &args)
     }
 
     fn launch(
-        op_type: ParametrizedUnaryOpType,
-        x: &(impl DeviceMatrixChunkImpl<Self> + ?Sized),
+        values: &(impl DeviceMatrixChunkImpl<T> + ?Sized),
         param: u32,
-        result: &mut (impl DeviceMatrixChunkMutImpl<Self> + ?Sized),
+        result: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
         stream: &CudaStream,
     ) -> CudaResult<()> {
-        assert_eq!(result.rows() % x.rows(), 0);
-        assert_eq!(result.cols() % x.cols(), 0);
+        assert_eq!(result.rows() % values.rows(), 0);
+        assert_eq!(result.cols() % values.cols(), 0);
         Self::launch_op(
-            op_type,
-            PtrAndStrideWrappingMatrix::new(x),
+            PtrAndStrideWrappingMatrix::new(values),
             param,
             MutPtrAndStrideWrappingMatrix::new(result),
             stream,
@@ -618,141 +294,106 @@ pub trait ParametrizedUnaryOp: Sized + DeviceRepr {
     }
 
     fn launch_in_place(
-        op_type: ParametrizedUnaryOpType,
-        x: &mut (impl DeviceMatrixChunkMutImpl<Self> + ?Sized),
+        values: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
         param: u32,
         stream: &CudaStream,
     ) -> CudaResult<()> {
         Self::launch_op(
-            op_type,
-            PtrAndStrideWrappingMatrix::new(x),
+            PtrAndStrideWrappingMatrix::new(values),
             param,
-            MutPtrAndStrideWrappingMatrix::new(x),
+            MutPtrAndStrideWrappingMatrix::new(values),
             stream,
         )
     }
 }
 
-impl ParametrizedUnaryOp for BaseField {
-    fn get_kernel(op_type: ParametrizedUnaryOpType) -> ParametrizedUnaryKernel<Self, Self> {
-        match op_type {
-            ParametrizedUnaryOpType::Pow => pow_bf_kernel,
-            ParametrizedUnaryOpType::Shl => shl_kernel,
-            ParametrizedUnaryOpType::Shr => shr_kernel,
+macro_rules! parametrized_op_def {
+    ($op:ty) => {
+        paste! {
+            pub struct $op;
+            pub fn [<$op:lower>]<T: DeviceRepr>(
+                values: &(impl DeviceMatrixChunkImpl<T> + ?Sized),
+                param: u32,
+                result: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
+                stream: &CudaStream,
+            ) -> CudaResult<()>  where $op: ParametrizedOp<T> {
+                $op::launch(values, param, result, stream)
+            }
+            pub fn [<$op:lower _in_place>]<T: DeviceRepr>(
+                values: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
+                param: u32,
+                stream: &CudaStream,
+            ) -> CudaResult<()>  where $op: ParametrizedOp<T> {
+                $op::launch_in_place(values, param, stream)
+            }
         }
-    }
+    };
 }
 
-impl ParametrizedUnaryOp for VectorizedExtensionField {
-    fn get_kernel(op_type: ParametrizedUnaryOpType) -> ParametrizedUnaryKernel<Self, Self> {
-        match op_type {
-            ParametrizedUnaryOpType::Pow => pow_ef_kernel,
-            ParametrizedUnaryOpType::Shl => unimplemented!(),
-            ParametrizedUnaryOpType::Shr => unimplemented!(),
+parametrized_op_def!(Pow);
+parametrized_op_def!(Shl);
+parametrized_op_def!(Shr);
+
+macro_rules! parametrized_op_impl {
+    ($op:ty, $type:ty) => {
+        paste! {
+            parametrized_op_kernel!($op, $type);
+            impl ParametrizedOp<$type> for $op {
+                const KERNEL_FUNCTION: ParametrizedOpSignature<$type> = [<$op:lower _ $type:lower _kernel>];
+            }
         }
-    }
+    };
 }
 
-fn parametrized_unary_op<T: ParametrizedUnaryOp>(
-    op_type: ParametrizedUnaryOpType,
-    x: &(impl DeviceMatrixChunkImpl<T> + ?Sized),
-    param: u32,
-    result: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    T::launch(op_type, x, param, result, stream)
+macro_rules! parametrized_ops_impl {
+    ($type:ty) => {
+        parametrized_op_impl!(Pow, $type);
+        parametrized_op_impl!(Shl, $type);
+        parametrized_op_impl!(Shr, $type);
+    };
 }
 
-fn parametrized_unary_op_in_place<T: ParametrizedUnaryOp>(
-    op_type: ParametrizedUnaryOpType,
-    x: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
-    param: u32,
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    T::launch_in_place(op_type, x, param, stream)
+parametrized_ops_impl!(BF);
+parametrized_ops_impl!(EF);
+
+// BINARY_KERNEL
+cuda_kernel_signature_arguments_and_function!(
+    BinaryOp<T0: DeviceRepr, T1: DeviceRepr, TR: DeviceRepr>,
+    x: PtrAndStrideWrappingMatrix<<T0 as DeviceRepr>::Type>,
+    y: PtrAndStrideWrappingMatrix<<T1 as DeviceRepr>::Type>,
+    result: MutPtrAndStrideWrappingMatrix<<TR as DeviceRepr>::Type>,
+);
+
+macro_rules! binary_op_kernel {
+    ($op:ty, $t0:ty, $t1:ty, $tr:ty) => {
+        paste! {
+            cuda_kernel_declaration!(
+                [<$op:lower _ $t0:lower _ $t1:lower _kernel>](
+                    x: PtrAndStrideWrappingMatrix<<$t0 as DeviceRepr>::Type>,
+                    y: PtrAndStrideWrappingMatrix<<$t1 as DeviceRepr>::Type>,
+                    result: MutPtrAndStrideWrappingMatrix<<$tr as DeviceRepr>::Type>,
+                )
+            );
+        }
+    };
 }
 
-pub fn pow<T: ParametrizedUnaryOp>(
-    x: &(impl DeviceMatrixChunkImpl<T> + ?Sized),
-    exponent: u32,
-    result: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    parametrized_unary_op(ParametrizedUnaryOpType::Pow, x, exponent, result, stream)
-}
-
-pub fn pow_in_place<T: ParametrizedUnaryOp>(
-    x: &mut (impl DeviceMatrixChunkMutImpl<T> + ?Sized),
-    exponent: u32,
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    parametrized_unary_op_in_place(ParametrizedUnaryOpType::Pow, x, exponent, stream)
-}
-
-pub fn shl(
-    x: &(impl DeviceMatrixChunkImpl<BaseField> + ?Sized),
-    shift: u32,
-    result: &mut (impl DeviceMatrixChunkMutImpl<BaseField> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    parametrized_unary_op(ParametrizedUnaryOpType::Shl, x, shift, result, stream)
-}
-
-pub fn shl_in_place(
-    x: &mut (impl DeviceMatrixChunkMutImpl<BaseField> + ?Sized),
-    shift: u32,
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    parametrized_unary_op_in_place(ParametrizedUnaryOpType::Shl, x, shift, stream)
-}
-
-pub fn shr(
-    x: &(impl DeviceMatrixChunkImpl<BaseField> + ?Sized),
-    shift: u32,
-    result: &mut (impl DeviceMatrixChunkMutImpl<BaseField> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    parametrized_unary_op(ParametrizedUnaryOpType::Shr, x, shift, result, stream)
-}
-
-pub fn shr_in_place(
-    x: &mut (impl DeviceMatrixChunkMutImpl<BaseField> + ?Sized),
-    shift: u32,
-    stream: &CudaStream,
-) -> CudaResult<()> {
-    parametrized_unary_op_in_place(ParametrizedUnaryOpType::Shr, x, shift, stream)
-}
-
-pub enum BinaryOpType {
-    Add,
-    Mul,
-    Sub,
-}
-
-type BinaryKernel<T0, T1, TR> = KernelThreeArgs<
-    PtrAndStrideWrappingMatrix<<T0 as DeviceRepr>::Type>,
-    PtrAndStrideWrappingMatrix<<T1 as DeviceRepr>::Type>,
-    MutPtrAndStrideWrappingMatrix<<TR as DeviceRepr>::Type>,
->;
-
-pub trait BinaryOp<T0: Sized + DeviceRepr, T1: Sized + DeviceRepr, TR: Sized + DeviceRepr> {
-    fn get_kernel(op_type: BinaryOpType) -> BinaryKernel<T0, T1, TR>;
+pub trait BinaryOp<T0: DeviceRepr, T1: DeviceRepr, TR: DeviceRepr> {
+    const KERNEL_FUNCTION: BinaryOpSignature<T0, T1, TR>;
 
     fn launch_op(
-        op_type: BinaryOpType,
         x: PtrAndStrideWrappingMatrix<T0::Type>,
         y: PtrAndStrideWrappingMatrix<T1::Type>,
         result: MutPtrAndStrideWrappingMatrix<TR::Type>,
         stream: &CudaStream,
     ) -> CudaResult<()> {
-        let kernel = Self::get_kernel(op_type);
         let (grid_dim, block_dim) = get_launch_dims(result.rows, result.cols);
-        let args = (&x, &y, &result);
-        unsafe { kernel.launch(grid_dim, block_dim, args, 0, stream) }
+        let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+        let args = BinaryOpArguments::<T0, T1, TR>::new(x, y, result);
+        BinaryOpFunction::<T0, T1, TR>(Self::KERNEL_FUNCTION).launch(&config, &args)
     }
 
     fn launch(
-        op_type: BinaryOpType,
         x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
         y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
         result: &mut (impl DeviceMatrixChunkMutImpl<TR> + ?Sized),
@@ -763,7 +404,6 @@ pub trait BinaryOp<T0: Sized + DeviceRepr, T1: Sized + DeviceRepr, TR: Sized + D
         assert_eq!(result.rows() % y.rows(), 0);
         assert_eq!(result.cols() % y.cols(), 0);
         Self::launch_op(
-            op_type,
             PtrAndStrideWrappingMatrix::new(x),
             PtrAndStrideWrappingMatrix::new(y),
             MutPtrAndStrideWrappingMatrix::new(result),
@@ -772,16 +412,14 @@ pub trait BinaryOp<T0: Sized + DeviceRepr, T1: Sized + DeviceRepr, TR: Sized + D
     }
 
     fn launch_into_x(
-        op_type: BinaryOpType,
         x: &mut (impl DeviceMatrixChunkMutImpl<T0> + ?Sized),
         y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
         stream: &CudaStream,
     ) -> CudaResult<()>
     where
-        (T0, T1, T0): BinaryOp<T0, T1, T0>,
+        Self: BinaryOp<T0, T1, T0>,
     {
-        <(T0, T1, T0)>::launch_op(
-            op_type,
+        <Self as BinaryOp<T0, T1, T0>>::launch_op(
             PtrAndStrideWrappingMatrix::new(x),
             PtrAndStrideWrappingMatrix::new(y),
             MutPtrAndStrideWrappingMatrix::new(x),
@@ -790,16 +428,14 @@ pub trait BinaryOp<T0: Sized + DeviceRepr, T1: Sized + DeviceRepr, TR: Sized + D
     }
 
     fn launch_into_y(
-        op_type: BinaryOpType,
         x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
         y: &mut (impl DeviceMatrixChunkMutImpl<T1> + ?Sized),
         stream: &CudaStream,
     ) -> CudaResult<()>
     where
-        (T0, T1, T1): BinaryOp<T0, T1, T1>,
+        Self: BinaryOp<T0, T1, T1>,
     {
-        <(T0, T1, T1)>::launch_op(
-            op_type,
+        <Self as BinaryOp<T0, T1, T1>>::launch_op(
             PtrAndStrideWrappingMatrix::new(x),
             PtrAndStrideWrappingMatrix::new(y),
             MutPtrAndStrideWrappingMatrix::new(y),
@@ -808,247 +444,106 @@ pub trait BinaryOp<T0: Sized + DeviceRepr, T1: Sized + DeviceRepr, TR: Sized + D
     }
 }
 
-impl BinaryOp<BaseField, BaseField, BaseField> for (BaseField, BaseField, BaseField) {
-    fn get_kernel(op_type: BinaryOpType) -> BinaryKernel<BaseField, BaseField, BaseField> {
-        match op_type {
-            BinaryOpType::Add => add_bf_bf_kernel,
-            BinaryOpType::Mul => mul_bf_bf_kernel,
-            BinaryOpType::Sub => sub_bf_bf_kernel,
+macro_rules! binary_op_def {
+    ($op:ty) => {
+        paste! {
+            pub struct $op;
+            pub fn [<$op:lower>]<T0: DeviceRepr, T1: DeviceRepr, TR: DeviceRepr>(
+                x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
+                y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
+                result: &mut (impl DeviceMatrixChunkMutImpl<TR> + ?Sized),
+                stream: &CudaStream,
+            ) -> CudaResult<()> where $op: BinaryOp<T0, T1, TR> {
+                $op::launch(x, y, result, stream)
+            }
+            pub fn [<$op:lower _into_x>]<T0: DeviceRepr, T1: DeviceRepr>(
+                x: &mut (impl DeviceMatrixChunkMutImpl<T0> + ?Sized),
+                y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
+                stream: &CudaStream,
+            ) -> CudaResult<()>  where $op: BinaryOp<T0, T1, T0> {
+                $op::launch_into_x(x, y, stream)
+            }
+            pub fn [<$op:lower _into_y>]<T0: DeviceRepr, T1: DeviceRepr>(
+                x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
+                y: &mut (impl DeviceMatrixChunkMutImpl<T1> + ?Sized),
+                stream: &CudaStream,
+            ) -> CudaResult<()>  where $op: BinaryOp<T0, T1, T1> {
+                $op::launch_into_y(x, y, stream)
+            }
         }
-    }
+    };
 }
 
-impl BinaryOp<BaseField, VectorizedExtensionField, VectorizedExtensionField>
-    for (
-        BaseField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-    )
-{
-    fn get_kernel(
-        op_type: BinaryOpType,
-    ) -> BinaryKernel<BaseField, VectorizedExtensionField, VectorizedExtensionField> {
-        match op_type {
-            BinaryOpType::Add => add_bf_ef_kernel,
-            BinaryOpType::Mul => mul_bf_ef_kernel,
-            BinaryOpType::Sub => sub_bf_ef_kernel,
+binary_op_def!(Add);
+binary_op_def!(Mul);
+binary_op_def!(Sub);
+
+macro_rules! binary_op_impl {
+    ($op:ty, $t0:ty, $t1:ty, $tr:ty) => {
+        paste! {
+            binary_op_kernel!($op, $t0, $t1, $tr);
+            impl BinaryOp<$t0, $t1, $tr> for $op {
+                const KERNEL_FUNCTION: BinaryOpSignature<$t0, $t1, $tr> = [<$op:lower _ $t0:lower _ $t1:lower _kernel>];
+            }
         }
-    }
+    };
 }
 
-impl BinaryOp<VectorizedExtensionField, BaseField, VectorizedExtensionField>
-    for (
-        VectorizedExtensionField,
-        BaseField,
-        VectorizedExtensionField,
-    )
-{
-    fn get_kernel(
-        op_type: BinaryOpType,
-    ) -> BinaryKernel<VectorizedExtensionField, BaseField, VectorizedExtensionField> {
-        match op_type {
-            BinaryOpType::Add => add_ef_bf_kernel,
-            BinaryOpType::Mul => mul_ef_bf_kernel,
-            BinaryOpType::Sub => sub_ef_bf_kernel,
+macro_rules! binary_ops_impl {
+    ($t0:ty, $t1:ty, $tr:ty) => {
+        binary_op_impl!(Add, $t0, $t1, $tr);
+        binary_op_impl!(Mul, $t0, $t1, $tr);
+        binary_op_impl!(Sub, $t0, $t1, $tr);
+    };
+}
+
+binary_ops_impl!(BF, BF, BF);
+binary_ops_impl!(BF, EF, EF);
+binary_ops_impl!(EF, BF, EF);
+binary_ops_impl!(EF, EF, EF);
+
+// TERNARY_KERNEL
+cuda_kernel_signature_arguments_and_function!(
+    TernaryOp<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr, TR: DeviceRepr>,
+    x: PtrAndStrideWrappingMatrix<<T0 as DeviceRepr>::Type>,
+    y: PtrAndStrideWrappingMatrix<<T1 as DeviceRepr>::Type>,
+    z: PtrAndStrideWrappingMatrix<<T2 as DeviceRepr>::Type>,
+    result: MutPtrAndStrideWrappingMatrix<<TR as DeviceRepr>::Type>,
+);
+
+macro_rules! ternary_op_kernel {
+    ($fn_name:ident, $t0:ty, $t1:ty, $t2:ty, $tr:ty) => {
+        paste! {
+            cuda_kernel_declaration!(
+                [<$fn_name _ $t0:lower _ $t1:lower _ $t2:lower _kernel>](
+                    x: PtrAndStrideWrappingMatrix<<$t0 as DeviceRepr>::Type>,
+                    y: PtrAndStrideWrappingMatrix<<$t1 as DeviceRepr>::Type>,
+                    z: PtrAndStrideWrappingMatrix<<$t2 as DeviceRepr>::Type>,
+                    result: MutPtrAndStrideWrappingMatrix<<$tr as DeviceRepr>::Type>,
+                )
+            );
         }
-    }
+    };
 }
 
-impl BinaryOp<VectorizedExtensionField, VectorizedExtensionField, VectorizedExtensionField>
-    for (
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-    )
-{
-    fn get_kernel(
-        op_type: BinaryOpType,
-    ) -> BinaryKernel<VectorizedExtensionField, VectorizedExtensionField, VectorizedExtensionField>
-    {
-        match op_type {
-            BinaryOpType::Add => add_ef_ef_kernel,
-            BinaryOpType::Mul => mul_ef_ef_kernel,
-            BinaryOpType::Sub => sub_ef_ef_kernel,
-        }
-    }
-}
-
-fn binary_op<T0: DeviceRepr, T1: DeviceRepr, TR: DeviceRepr>(
-    op_type: BinaryOpType,
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    result: &mut (impl DeviceMatrixChunkMutImpl<TR> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, TR): BinaryOp<T0, T1, TR>,
-{
-    <(T0, T1, TR)>::launch(op_type, x, y, result, stream)
-}
-
-fn binary_op_into_x<T0: DeviceRepr, T1: DeviceRepr>(
-    op_type: BinaryOpType,
-    x: &mut (impl DeviceMatrixChunkMutImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T0): BinaryOp<T0, T1, T0>,
-{
-    <(T0, T1, T0)>::launch_into_x(op_type, x, y, stream)
-}
-
-fn binary_op_into_y<T0: DeviceRepr, T1: DeviceRepr>(
-    op_type: BinaryOpType,
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &mut (impl DeviceMatrixChunkMutImpl<T1> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T1): BinaryOp<T0, T1, T1>,
-{
-    <(T0, T1, T1)>::launch_into_y(op_type, x, y, stream)
-}
-
-pub fn add<T0: DeviceRepr, T1: DeviceRepr, TR: DeviceRepr>(
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    result: &mut (impl DeviceMatrixChunkMutImpl<TR> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, TR): BinaryOp<T0, T1, TR>,
-{
-    binary_op(BinaryOpType::Add, x, y, result, stream)
-}
-
-pub fn add_into_x<T0: DeviceRepr, T1: DeviceRepr>(
-    x: &mut (impl DeviceMatrixChunkMutImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T0): BinaryOp<T0, T1, T0>,
-{
-    binary_op_into_x(BinaryOpType::Add, x, y, stream)
-}
-
-pub fn add_into_y<T0: DeviceRepr, T1: DeviceRepr>(
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &mut (impl DeviceMatrixChunkMutImpl<T1> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T1): BinaryOp<T0, T1, T1>,
-{
-    binary_op_into_y(BinaryOpType::Add, x, y, stream)
-}
-
-pub fn mul<T0: DeviceRepr, T1: DeviceRepr, TR: DeviceRepr>(
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    result: &mut (impl DeviceMatrixChunkMutImpl<TR> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, TR): BinaryOp<T0, T1, TR>,
-{
-    binary_op(BinaryOpType::Mul, x, y, result, stream)
-}
-
-pub fn mul_into_x<T0: DeviceRepr, T1: DeviceRepr>(
-    x: &mut (impl DeviceMatrixChunkMutImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T0): BinaryOp<T0, T1, T0>,
-{
-    binary_op_into_x(BinaryOpType::Mul, x, y, stream)
-}
-
-pub fn mul_into_y<T0: DeviceRepr, T1: DeviceRepr>(
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &mut (impl DeviceMatrixChunkMutImpl<T1> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T1): BinaryOp<T0, T1, T1>,
-{
-    binary_op_into_y(BinaryOpType::Mul, x, y, stream)
-}
-
-pub fn sub<T0: DeviceRepr, T1: DeviceRepr, TR: DeviceRepr>(
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    result: &mut (impl DeviceMatrixChunkMutImpl<TR> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, TR): BinaryOp<T0, T1, TR>,
-{
-    binary_op(BinaryOpType::Sub, x, y, result, stream)
-}
-
-pub fn sub_into_x<T0: DeviceRepr, T1: DeviceRepr>(
-    x: &mut (impl DeviceMatrixChunkMutImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T0): BinaryOp<T0, T1, T0>,
-{
-    binary_op_into_x(BinaryOpType::Sub, x, y, stream)
-}
-
-pub fn sub_into_y<T0: DeviceRepr, T1: DeviceRepr>(
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &mut (impl DeviceMatrixChunkMutImpl<T1> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T1): BinaryOp<T0, T1, T1>,
-{
-    binary_op_into_y(BinaryOpType::Sub, x, y, stream)
-}
-
-pub enum TernaryOpType {
-    MulAdd,
-    MulSub,
-}
-
-type TernaryKernel<T0, T1, T2, TR> = KernelFourArgs<
-    PtrAndStrideWrappingMatrix<<T0 as DeviceRepr>::Type>,
-    PtrAndStrideWrappingMatrix<<T1 as DeviceRepr>::Type>,
-    PtrAndStrideWrappingMatrix<<T2 as DeviceRepr>::Type>,
-    MutPtrAndStrideWrappingMatrix<<TR as DeviceRepr>::Type>,
->;
-
-pub trait TernaryOp<
-    T0: Sized + DeviceRepr,
-    T1: Sized + DeviceRepr,
-    T2: Sized + DeviceRepr,
-    TR: Sized + DeviceRepr,
->
-{
-    fn get_kernel(op_type: TernaryOpType) -> TernaryKernel<T0, T1, T2, TR>;
+pub trait TernaryOp<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr, TR: DeviceRepr> {
+    fn get_kernel_function() -> TernaryOpSignature<T0, T1, T2, TR>;
 
     fn launch_op(
-        op_type: TernaryOpType,
         x: PtrAndStrideWrappingMatrix<T0::Type>,
         y: PtrAndStrideWrappingMatrix<T1::Type>,
         z: PtrAndStrideWrappingMatrix<T2::Type>,
         result: MutPtrAndStrideWrappingMatrix<TR::Type>,
         stream: &CudaStream,
     ) -> CudaResult<()> {
-        let kernel = Self::get_kernel(op_type);
+        let kernel_function = Self::get_kernel_function();
         let (grid_dim, block_dim) = get_launch_dims(result.rows, result.cols);
-        let args = (&x, &y, &z, &result);
-        unsafe { kernel.launch(grid_dim, block_dim, args, 0, stream) }
+        let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
+        let args = TernaryOpArguments::<T0, T1, T2, TR>::new(x, y, z, result);
+        TernaryOpFunction::<T0, T1, T2, TR>(kernel_function).launch(&config, &args)
     }
 
     fn launch(
-        op_type: TernaryOpType,
         x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
         y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
         z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
@@ -1062,7 +557,6 @@ pub trait TernaryOp<
         assert_eq!(result.rows() % z.rows(), 0);
         assert_eq!(result.cols() % z.cols(), 0);
         Self::launch_op(
-            op_type,
             PtrAndStrideWrappingMatrix::new(x),
             PtrAndStrideWrappingMatrix::new(y),
             PtrAndStrideWrappingMatrix::new(z),
@@ -1072,17 +566,15 @@ pub trait TernaryOp<
     }
 
     fn launch_into_x(
-        op_type: TernaryOpType,
         x: &mut (impl DeviceMatrixChunkMutImpl<T0> + ?Sized),
         y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
         z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
         stream: &CudaStream,
     ) -> CudaResult<()>
     where
-        (T0, T1, T2, T0): TernaryOp<T0, T1, T2, T0>,
+        Self: TernaryOp<T0, T1, T2, T0>,
     {
-        <(T0, T1, T2, T0)>::launch_op(
-            op_type,
+        <Self as TernaryOp<T0, T1, T2, T0>>::launch_op(
             PtrAndStrideWrappingMatrix::new(x),
             PtrAndStrideWrappingMatrix::new(y),
             PtrAndStrideWrappingMatrix::new(z),
@@ -1092,17 +584,15 @@ pub trait TernaryOp<
     }
 
     fn launch_into_y(
-        op_type: TernaryOpType,
         x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
         y: &mut (impl DeviceMatrixChunkMutImpl<T1> + ?Sized),
         z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
         stream: &CudaStream,
     ) -> CudaResult<()>
     where
-        (T0, T1, T2, T1): TernaryOp<T0, T1, T2, T1>,
+        Self: TernaryOp<T0, T1, T2, T1>,
     {
-        <(T0, T1, T2, T1)>::launch_op(
-            op_type,
+        <Self as TernaryOp<T0, T1, T2, T1>>::launch_op(
             PtrAndStrideWrappingMatrix::new(x),
             PtrAndStrideWrappingMatrix::new(y),
             PtrAndStrideWrappingMatrix::new(z),
@@ -1112,17 +602,15 @@ pub trait TernaryOp<
     }
 
     fn launch_into_z(
-        op_type: TernaryOpType,
         x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
         y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
         z: &mut (impl DeviceMatrixChunkMutImpl<T2> + ?Sized),
         stream: &CudaStream,
     ) -> CudaResult<()>
     where
-        (T0, T1, T2, T2): TernaryOp<T0, T1, T2, T2>,
+        Self: TernaryOp<T0, T1, T2, T2>,
     {
-        <(T0, T1, T2, T2)>::launch_op(
-            op_type,
+        <Self as TernaryOp<T0, T1, T2, T2>>::launch_op(
             PtrAndStrideWrappingMatrix::new(x),
             PtrAndStrideWrappingMatrix::new(y),
             PtrAndStrideWrappingMatrix::new(z),
@@ -1132,355 +620,89 @@ pub trait TernaryOp<
     }
 }
 
-impl TernaryOp<BaseField, BaseField, BaseField, BaseField>
-    for (BaseField, BaseField, BaseField, BaseField)
-{
-    fn get_kernel(
-        op_type: TernaryOpType,
-    ) -> TernaryKernel<BaseField, BaseField, BaseField, BaseField> {
-        match op_type {
-            TernaryOpType::MulAdd => mul_add_bf_bf_bf_kernel,
-            TernaryOpType::MulSub => mul_sub_bf_bf_bf_kernel,
+macro_rules! ternary_op_def {
+    ($op:ty, $fn_name:ident) => {
+        paste! {
+            pub struct $op;
+            pub fn $fn_name<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr, TR: DeviceRepr>(
+                x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
+                y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
+                z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
+                result: &mut (impl DeviceMatrixChunkMutImpl<TR> + ?Sized),
+                stream: &CudaStream,
+            ) -> CudaResult<()> where $op: TernaryOp<T0, T1, T2, TR> {
+                $op::launch(x, y, z, result, stream)
+            }
+            pub fn [<$fn_name _into_x>]<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr>(
+                x: &mut (impl DeviceMatrixChunkMutImpl<T0> + ?Sized),
+                y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
+                z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
+                stream: &CudaStream,
+            ) -> CudaResult<()>  where $op: TernaryOp<T0, T1, T2, T0> {
+                $op::launch_into_x(x, y, z, stream)
+            }
+            pub fn [<$fn_name _into_y>]<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr>(
+                x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
+                y: &mut (impl DeviceMatrixChunkMutImpl<T1> + ?Sized),
+                z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
+                stream: &CudaStream,
+            ) -> CudaResult<()>  where $op: TernaryOp<T0, T1, T2, T1> {
+                $op::launch_into_y(x, y, z, stream)
+            }
+            pub fn [<$fn_name _into_z>]<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr>(
+                x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
+                y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
+                z: &mut (impl DeviceMatrixChunkMutImpl<T2> + ?Sized),
+                stream: &CudaStream,
+            ) -> CudaResult<()>  where $op: TernaryOp<T0, T1, T2, T2> {
+                $op::launch_into_z(x, y, z, stream)
+            }
         }
-    }
+    };
 }
 
-impl TernaryOp<BaseField, BaseField, VectorizedExtensionField, VectorizedExtensionField>
-    for (
-        BaseField,
-        BaseField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-    )
-{
-    fn get_kernel(
-        op_type: TernaryOpType,
-    ) -> TernaryKernel<BaseField, BaseField, VectorizedExtensionField, VectorizedExtensionField>
-    {
-        match op_type {
-            TernaryOpType::MulAdd => mul_add_bf_bf_ef_kernel,
-            TernaryOpType::MulSub => mul_sub_bf_bf_ef_kernel,
+ternary_op_def!(MulAdd, mul_add);
+ternary_op_def!(MulSub, mul_sub);
+
+macro_rules! ternary_op_impl {
+    ($op:ty, $fn_name:ident, $t0:ty, $t1:ty, $t2:ty, $tr:ty) => {
+        paste! {
+            ternary_op_kernel!($fn_name, $t0, $t1, $t2, $tr);
+            impl TernaryOp<$t0, $t1, $t2, $tr> for $op {
+                fn get_kernel_function() -> TernaryOpSignature<$t0, $t1, $t2, $tr> {
+                    [<$fn_name _ $t0:lower _ $t1:lower _ $t2:lower _kernel>]
+                }
+            }
         }
-    }
+    };
 }
 
-impl TernaryOp<BaseField, VectorizedExtensionField, BaseField, VectorizedExtensionField>
-    for (
-        BaseField,
-        VectorizedExtensionField,
-        BaseField,
-        VectorizedExtensionField,
-    )
-{
-    fn get_kernel(
-        op_type: TernaryOpType,
-    ) -> TernaryKernel<BaseField, VectorizedExtensionField, BaseField, VectorizedExtensionField>
-    {
-        match op_type {
-            TernaryOpType::MulAdd => mul_add_bf_ef_bf_kernel,
-            TernaryOpType::MulSub => mul_sub_bf_ef_bf_kernel,
-        }
-    }
+macro_rules! ternary_ops_impl {
+    ($t0:ty, $t1:ty, $t2:ty, $tr:ty) => {
+        ternary_op_impl!(MulAdd, mul_add, $t0, $t1, $t2, $tr);
+        ternary_op_impl!(MulSub, mul_sub, $t0, $t1, $t2, $tr);
+    };
 }
 
-impl
-    TernaryOp<
-        BaseField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-    >
-    for (
-        BaseField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-    )
-{
-    fn get_kernel(
-        op_type: TernaryOpType,
-    ) -> TernaryKernel<
-        BaseField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-    > {
-        match op_type {
-            TernaryOpType::MulAdd => mul_add_bf_ef_ef_kernel,
-            TernaryOpType::MulSub => mul_sub_bf_ef_ef_kernel,
-        }
-    }
-}
-
-impl TernaryOp<VectorizedExtensionField, BaseField, BaseField, VectorizedExtensionField>
-    for (
-        VectorizedExtensionField,
-        BaseField,
-        BaseField,
-        VectorizedExtensionField,
-    )
-{
-    fn get_kernel(
-        op_type: TernaryOpType,
-    ) -> TernaryKernel<VectorizedExtensionField, BaseField, BaseField, VectorizedExtensionField>
-    {
-        match op_type {
-            TernaryOpType::MulAdd => mul_add_ef_bf_bf_kernel,
-            TernaryOpType::MulSub => mul_sub_ef_bf_bf_kernel,
-        }
-    }
-}
-
-impl
-    TernaryOp<
-        VectorizedExtensionField,
-        BaseField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-    >
-    for (
-        VectorizedExtensionField,
-        BaseField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-    )
-{
-    fn get_kernel(
-        op_type: TernaryOpType,
-    ) -> TernaryKernel<
-        VectorizedExtensionField,
-        BaseField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-    > {
-        match op_type {
-            TernaryOpType::MulAdd => mul_add_ef_bf_ef_kernel,
-            TernaryOpType::MulSub => mul_sub_ef_bf_ef_kernel,
-        }
-    }
-}
-
-impl
-    TernaryOp<
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-        BaseField,
-        VectorizedExtensionField,
-    >
-    for (
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-        BaseField,
-        VectorizedExtensionField,
-    )
-{
-    fn get_kernel(
-        op_type: TernaryOpType,
-    ) -> TernaryKernel<
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-        BaseField,
-        VectorizedExtensionField,
-    > {
-        match op_type {
-            TernaryOpType::MulAdd => mul_add_ef_ef_bf_kernel,
-            TernaryOpType::MulSub => mul_sub_ef_ef_bf_kernel,
-        }
-    }
-}
-
-impl
-    TernaryOp<
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-    >
-    for (
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-    )
-{
-    fn get_kernel(
-        op_type: TernaryOpType,
-    ) -> TernaryKernel<
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-        VectorizedExtensionField,
-    > {
-        match op_type {
-            TernaryOpType::MulAdd => mul_add_ef_ef_ef_kernel,
-            TernaryOpType::MulSub => mul_sub_ef_ef_ef_kernel,
-        }
-    }
-}
-
-fn ternary_op<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr, TR: DeviceRepr>(
-    op_type: TernaryOpType,
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
-    result: &mut (impl DeviceMatrixChunkMutImpl<TR> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T2, TR): TernaryOp<T0, T1, T2, TR>,
-{
-    <(T0, T1, T2, TR)>::launch(op_type, x, y, z, result, stream)
-}
-
-fn ternary_op_into_x<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr>(
-    op_type: TernaryOpType,
-    x: &mut (impl DeviceMatrixChunkMutImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T2, T0): TernaryOp<T0, T1, T2, T0>,
-{
-    <(T0, T1, T2, T0)>::launch_into_x(op_type, x, y, z, stream)
-}
-
-fn ternary_op_into_y<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr>(
-    op_type: TernaryOpType,
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &mut (impl DeviceMatrixChunkMutImpl<T1> + ?Sized),
-    z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T2, T1): TernaryOp<T0, T1, T2, T1>,
-{
-    <(T0, T1, T2, T1)>::launch_into_y(op_type, x, y, z, stream)
-}
-
-fn ternary_op_into_z<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr>(
-    op_type: TernaryOpType,
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    z: &mut (impl DeviceMatrixChunkMutImpl<T2> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T2, T2): TernaryOp<T0, T1, T2, T2>,
-{
-    <(T0, T1, T2, T2)>::launch_into_z(op_type, x, y, z, stream)
-}
-
-pub fn mul_add<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr, TR: DeviceRepr>(
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
-    result: &mut (impl DeviceMatrixChunkMutImpl<TR> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T2, TR): TernaryOp<T0, T1, T2, TR>,
-{
-    ternary_op(TernaryOpType::MulAdd, x, y, z, result, stream)
-}
-
-pub fn mul_add_into_x<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr>(
-    x: &mut (impl DeviceMatrixChunkMutImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T2, T0): TernaryOp<T0, T1, T2, T0>,
-{
-    ternary_op_into_x(TernaryOpType::MulAdd, x, y, z, stream)
-}
-
-pub fn mul_add_into_y<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr>(
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &mut (impl DeviceMatrixChunkMutImpl<T1> + ?Sized),
-    z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T2, T1): TernaryOp<T0, T1, T2, T1>,
-{
-    ternary_op_into_y(TernaryOpType::MulAdd, x, y, z, stream)
-}
-
-pub fn mul_add_into_z<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr>(
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    z: &mut (impl DeviceMatrixChunkMutImpl<T2> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T2, T2): TernaryOp<T0, T1, T2, T2>,
-{
-    ternary_op_into_z(TernaryOpType::MulAdd, x, y, z, stream)
-}
-
-pub fn mul_sub<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr, TR: DeviceRepr>(
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
-    result: &mut (impl DeviceMatrixChunkMutImpl<TR> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T2, TR): TernaryOp<T0, T1, T2, TR>,
-{
-    ternary_op(TernaryOpType::MulSub, x, y, z, result, stream)
-}
-
-pub fn mul_sub_into_x<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr>(
-    x: &mut (impl DeviceMatrixChunkMutImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T2, T0): TernaryOp<T0, T1, T2, T0>,
-{
-    ternary_op_into_x(TernaryOpType::MulSub, x, y, z, stream)
-}
-
-pub fn mul_sub_into_y<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr>(
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &mut (impl DeviceMatrixChunkMutImpl<T1> + ?Sized),
-    z: &(impl DeviceMatrixChunkImpl<T2> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T2, T1): TernaryOp<T0, T1, T2, T1>,
-{
-    ternary_op_into_y(TernaryOpType::MulSub, x, y, z, stream)
-}
-
-pub fn mul_sub_into_z<T0: DeviceRepr, T1: DeviceRepr, T2: DeviceRepr>(
-    x: &(impl DeviceMatrixChunkImpl<T0> + ?Sized),
-    y: &(impl DeviceMatrixChunkImpl<T1> + ?Sized),
-    z: &mut (impl DeviceMatrixChunkMutImpl<T2> + ?Sized),
-    stream: &CudaStream,
-) -> CudaResult<()>
-where
-    (T0, T1, T2, T2): TernaryOp<T0, T1, T2, T2>,
-{
-    ternary_op_into_z(TernaryOpType::MulSub, x, y, z, stream)
-}
+ternary_ops_impl!(BF, BF, BF, BF);
+ternary_ops_impl!(BF, BF, EF, EF);
+ternary_ops_impl!(BF, EF, BF, EF);
+ternary_ops_impl!(BF, EF, EF, EF);
+ternary_ops_impl!(EF, BF, BF, EF);
+ternary_ops_impl!(EF, BF, EF, EF);
+ternary_ops_impl!(EF, EF, BF, EF);
+ternary_ops_impl!(EF, EF, EF, EF);
 
 #[cfg(test)]
 mod tests {
-    use std::ops::{Add, Mul, Sub};
-
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::field::{Field, PrimeField, U64Representable};
-    use itertools::Itertools;
-
     use cudart::memory::{memory_copy_async, DeviceAllocation};
     use cudart::result::CudaResult;
     use cudart::slice::DeviceSlice;
     use cudart::stream::CudaStream;
+    use itertools::Itertools;
+    use std::ops::{Add, Mul, Sub};
 
     #[test]
     fn set_by_val() {
@@ -1975,7 +1197,7 @@ mod tests {
         let device_fn =
             |y: &mut DeviceSlice<GoldilocksField>,
              x: &DeviceSlice<GoldilocksField>,
-             stream: &CudaStream| (super::add_into_y(x, y, stream));
+             stream: &CudaStream| super::add_into_y(x, y, stream);
         binary_op_in_place_test(
             &UNREDUCED_VALUES,
             &UNREDUCED_VALUES,
@@ -2017,7 +1239,7 @@ mod tests {
         let device_fn =
             |x: &mut DeviceSlice<GoldilocksField>,
              y: &DeviceSlice<GoldilocksField>,
-             stream: &CudaStream| (super::mul_into_y(y, x, stream));
+             stream: &CudaStream| super::mul_into_y(y, x, stream);
         binary_op_in_place_test(
             &UNREDUCED_VALUES,
             &UNREDUCED_VALUES,
