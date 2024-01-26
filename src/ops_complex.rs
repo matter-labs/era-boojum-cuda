@@ -10,7 +10,6 @@ use crate::ops_simple::{set_by_val, set_to_zero};
 use crate::utils::{get_grid_block_dims_for_threads_count, WARP_SIZE};
 use crate::BaseField;
 use cudart::execution::{CudaLaunchConfig, Dim3, KernelFunction};
-use cudart::memory::memory_copy_async;
 use cudart::paste::paste;
 use cudart::result::CudaResult;
 use cudart::slice::{DeviceSlice, DeviceVariable};
@@ -462,7 +461,7 @@ pub fn select(
 cuda_kernel!(
     MarkEndsOfRuns,
     mark_ends_of_runs_kernel(
-        run_lengths: *const u32,
+        num_runs_out: *const u32,
         run_offsets: *const u32,
         result: *mut u32,
         count: u32,
@@ -470,21 +469,20 @@ cuda_kernel!(
 );
 
 pub fn mark_ends_of_runs(
-    run_lengths: &DeviceSlice<u32>,
+    num_runs_out: &DeviceVariable<u32>,
     run_offsets: &DeviceSlice<u32>,
     result: &mut DeviceSlice<u32>,
     stream: &CudaStream,
 ) -> CudaResult<()> {
-    assert_eq!(run_lengths.len(), run_offsets.len());
-    assert!(run_lengths.len() <= u32::MAX as usize);
-    assert!(result.len() <= u32::MAX as usize);
-    let count = run_lengths.len() as u32;
+    assert!(run_offsets.len() <= u32::MAX as usize);
+    assert_eq!(run_offsets.len(), result.len());
+    let count = run_offsets.len() as u32;
     let (grid_dim, block_dim) = get_launch_dims(count);
-    let run_lengths = run_lengths.as_ptr();
+    let num_runs_out = num_runs_out.as_ptr();
     let run_offsets = run_offsets.as_ptr();
     let result = result.as_mut_ptr();
     let config = CudaLaunchConfig::basic(grid_dim, block_dim, stream);
-    let args = MarkEndsOfRunsArguments::new(run_lengths, run_offsets, result, count);
+    let args = MarkEndsOfRunsArguments::new(num_runs_out, run_offsets, result, count);
     MarkEndsOfRunsFunction::default().launch(&config, &args)
 }
 
@@ -493,7 +491,7 @@ cuda_kernel!(
     generate_permutation_matrix_kernel(
         unique_variable_indexes: *const u32,
         run_indexes: *const u32,
-        run_lengths: *const u32,
+        num_runs_out: *const u32,
         run_offsets: *const u32,
         cell_indexes: *const u32,
         scalars: *const BF,
@@ -507,7 +505,7 @@ cuda_kernel!(
 fn generate_permutation_matrix_raw(
     unique_variable_indexes: &DeviceSlice<u32>,
     run_indexes: &DeviceSlice<u32>,
-    run_lengths: &DeviceSlice<u32>,
+    num_runs_out: &DeviceVariable<u32>,
     run_offsets: &DeviceSlice<u32>,
     cell_indexes: &DeviceSlice<u32>,
     scalars: &DeviceSlice<BF>,
@@ -515,9 +513,8 @@ fn generate_permutation_matrix_raw(
     stream: &CudaStream,
 ) -> CudaResult<()> {
     assert!(run_indexes.len() <= u32::MAX as usize);
-    assert_eq!(run_lengths.len(), run_offsets.len());
-    assert_eq!(run_lengths.len(), unique_variable_indexes.len());
-    assert!(run_lengths.len() <= u32::MAX as usize);
+    assert_eq!(run_indexes.len(), run_offsets.len());
+    assert_eq!(run_indexes.len(), unique_variable_indexes.len());
     assert!(cell_indexes.len() <= u32::MAX as usize);
     assert!(scalars.len() <= u32::MAX as usize);
     let columns_count = scalars.len() as u32;
@@ -530,7 +527,7 @@ fn generate_permutation_matrix_raw(
     let log_rows_count = rows_count.ilog2();
     let unique_variable_indexes = unique_variable_indexes.as_ptr();
     let run_indexes = run_indexes.as_ptr();
-    let run_lengths = run_lengths.as_ptr();
+    let num_runs_out = num_runs_out.as_ptr();
     let run_offsets = run_offsets.as_ptr();
     let cell_indexes = cell_indexes.as_ptr();
     let scalars = scalars.as_ptr();
@@ -539,7 +536,7 @@ fn generate_permutation_matrix_raw(
     let args = GeneratePermutationMatrixArguments::new(
         unique_variable_indexes,
         run_indexes,
-        run_lengths,
+        num_runs_out,
         run_offsets,
         cell_indexes,
         scalars,
@@ -555,13 +552,13 @@ pub fn get_generate_permutation_matrix_temp_storage_bytes(num_cells: usize) -> C
     let num_bytes = num_cells * cell_size;
     let sort_pairs_tsb =
         get_sort_pairs_temp_storage_bytes::<u32, u32>(false, num_cells as u32, 0, 32)?;
-    assert!(sort_pairs_tsb <= 4 * num_bytes);
+    assert!(sort_pairs_tsb <= 3 * num_bytes + cell_size);
     let encode_tsb = get_encode_temp_storage_bytes::<u32>(num_cells as i32)?;
-    assert!(encode_tsb <= 2 * num_bytes - cell_size);
+    assert!(encode_tsb <= num_bytes);
     let scan_tsb =
         get_scan_temp_storage_bytes::<u32>(ScanOperation::Sum, false, false, num_cells as i32)?;
     assert!(scan_tsb <= 2 * num_bytes);
-    Ok(5 * num_bytes)
+    Ok(4 * num_bytes + cell_size)
 }
 
 pub fn generate_permutation_matrix(
@@ -604,22 +601,19 @@ pub fn generate_permutation_matrix(
     let unique_variable_indexes = unsafe { unique_variable_indexes.transmute_mut() };
     let (run_lengths, temp_storage) = temp_storage.split_at_mut(num_bytes);
     let run_lengths = unsafe { run_lengths.transmute_mut() };
-    let (num_runs_out, encode_temp_storage) = temp_storage.split_at_mut(cell_size);
+    let (temp_storage, num_runs_out) = temp_storage.split_at_mut(num_bytes);
     let num_runs_out = unsafe { &mut num_runs_out.transmute_mut()[0] };
-    set_to_zero(run_lengths, stream)?;
     encode(
-        encode_temp_storage,
+        temp_storage,
         sorted_variable_indexes,
         unique_variable_indexes,
         run_lengths,
         num_runs_out,
         stream,
     )?;
-    let (run_offsets, run_indexes) = temp_storage.split_at_mut(num_cells * 4);
-    let run_offsets = unsafe { run_offsets.transmute_mut() };
-    let run_indexes = unsafe { run_indexes.transmute_mut() };
+    let run_offsets = run_lengths;
+    let run_indexes = unsafe { temp_storage.transmute_mut() };
     let temp_storage = unsafe { result.transmute_mut() };
-    memory_copy_async(run_offsets, run_lengths, stream)?;
     scan_in_place(
         ScanOperation::Sum,
         false,
@@ -629,7 +623,7 @@ pub fn generate_permutation_matrix(
         stream,
     )?;
     set_to_zero(run_indexes, stream)?;
-    mark_ends_of_runs(run_lengths, run_offsets, run_indexes, stream)?;
+    mark_ends_of_runs(num_runs_out, run_offsets, run_indexes, stream)?;
     scan_in_place(
         ScanOperation::Sum,
         false,
@@ -641,7 +635,7 @@ pub fn generate_permutation_matrix(
     generate_permutation_matrix_raw(
         unique_variable_indexes,
         run_indexes,
-        run_lengths,
+        num_runs_out,
         run_offsets,
         sorted_cell_indexes,
         scalars,
@@ -1850,11 +1844,9 @@ mod tests {
         let mut d_unique_out = DeviceAllocation::alloc(N).unwrap();
         let mut d_counts_out = DeviceAllocation::alloc(N).unwrap();
         let mut d_num_runs_out = DeviceAllocation::alloc(1).unwrap();
-        let mut d_offsets = DeviceAllocation::alloc(N).unwrap();
         let mut d_result = DeviceAllocation::alloc(N).unwrap();
         let stream = CudaStream::default();
         memory_copy_async(&mut d_in, &h_in, &stream).unwrap();
-        set_to_zero(&mut d_counts_out, &stream).unwrap();
         encode(
             &mut d_temp_storage,
             &d_in,
@@ -1864,7 +1856,7 @@ mod tests {
             &stream,
         )
         .unwrap();
-        memory_copy_async(&mut d_offsets, &d_counts_out, &stream).unwrap();
+        let mut d_offsets = d_counts_out;
         scan_in_place(
             ScanOperation::Sum,
             false,
@@ -1875,7 +1867,7 @@ mod tests {
         )
         .unwrap();
         set_to_zero(&mut d_result, &stream).unwrap();
-        super::mark_ends_of_runs(&d_counts_out, &d_offsets, &mut d_result, &stream).unwrap();
+        super::mark_ends_of_runs(&d_num_runs_out[0], &d_offsets, &mut d_result, &stream).unwrap();
         memory_copy_async(&mut h_result, &d_result, &stream).unwrap();
         stream.synchronize().unwrap();
         for i in 0..N {
