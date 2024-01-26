@@ -232,18 +232,18 @@ EXTERN __global__ void pack_variable_indexes_kernel(const uint64_t *src, uint32_
   memory::store_cs(dst + gid, u32);
 }
 
-EXTERN __global__ void mark_ends_of_runs_kernel(const unsigned *run_lengths, const unsigned *run_offsets, unsigned *result, const unsigned count) {
+EXTERN __global__ void mark_ends_of_runs_kernel(const unsigned *num_runs_out, const unsigned *run_offsets, unsigned *result, const unsigned count) {
   const unsigned gid = blockIdx.x * blockDim.x + threadIdx.x;
-  if (gid >= count)
-    return;
-  const unsigned run_length = run_lengths[gid];
-  if (run_length == 0)
+  const unsigned num_runs = *num_runs_out;
+  if (gid >= num_runs)
     return;
   const unsigned run_offset = run_offsets[gid];
+  const unsigned run_offset_next = gid == num_runs - 1 ? count : run_offsets[gid + 1];
+  const unsigned run_length = run_offset_next - run_offset;
   result[run_offset + run_length - 1] = 1;
 }
 
-EXTERN __global__ void generate_permutation_matrix_kernel(const unsigned *unique_variable_indexes, const unsigned *run_indexes, const unsigned *run_lengths,
+EXTERN __global__ void generate_permutation_matrix_kernel(const unsigned *unique_variable_indexes, const unsigned *run_indexes, const unsigned *num_runs_out,
                                                           const unsigned *run_offsets, const unsigned *cell_indexes, const base_field *scalars,
                                                           base_field *result, const unsigned columns_count, const unsigned log_rows_count) {
   const unsigned gid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -253,8 +253,10 @@ EXTERN __global__ void generate_permutation_matrix_kernel(const unsigned *unique
   const unsigned last_run_index = run_indexes[count - 1];
   const unsigned last_run_variable_index = unique_variable_indexes[last_run_index];
   const unsigned run_index = run_indexes[gid];
-  const unsigned run_length = run_lengths[run_index];
   const unsigned run_offset = run_offsets[run_index];
+  const unsigned num_runs = *num_runs_out;
+  const unsigned run_offset_next = run_index == num_runs - 1 ? count : run_offsets[run_index + 1];
+  const unsigned run_length = run_offset_next - run_offset;
   const unsigned src_in_run_index = gid - run_offset;
   const bool is_placeholder = run_index == last_run_index && last_run_variable_index == (1U << 31);
   const unsigned dst_in_run_index = is_placeholder ? src_in_run_index : (src_in_run_index + 1) % run_length;
