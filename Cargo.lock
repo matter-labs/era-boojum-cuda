@@ -353,7 +353,7 @@ dependencies = [
 [[package]]
 name = "criterion-cuda"
 version = "0.1.0"
-source = "git+https://github.com/matter-labs/era-cuda.git?branch=main#465d2acdfce49123f6334f5b43bf799962a4c77f"
+source = "git+https://github.com/matter-labs/era-cuda.git?branch=main#3ef61d56b84c1f877fe8aab6ec2b1d14a96cd671"
 dependencies = [
  "criterion",
  "cudart",
@@ -475,7 +475,7 @@ dependencies = [
 [[package]]
 name = "cudart"
 version = "0.1.0"
-source = "git+https://github.com/matter-labs/era-cuda.git?branch=main#465d2acdfce49123f6334f5b43bf799962a4c77f"
+source = "git+https://github.com/matter-labs/era-cuda.git?branch=main#3ef61d56b84c1f877fe8aab6ec2b1d14a96cd671"
 dependencies = [
  "bitflags 2.4.2",
  "cudart-sys",
@@ -485,7 +485,7 @@ dependencies = [
 [[package]]
 name = "cudart-sys"
 version = "0.1.0"
-source = "git+https://github.com/matter-labs/era-cuda.git?branch=main#465d2acdfce49123f6334f5b43bf799962a4c77f"
+source = "git+https://github.com/matter-labs/era-cuda.git?branch=main#3ef61d56b84c1f877fe8aab6ec2b1d14a96cd671"
 dependencies = [
  "bindgen",
  "serde_json",
