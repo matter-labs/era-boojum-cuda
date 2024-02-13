@@ -5,7 +5,7 @@ use boojum::field::{Field, PrimeField};
 use cudart::memory::{memory_copy, DeviceAllocation};
 use cudart::result::{CudaResult, CudaResultWrap};
 use cudart::slice::DeviceSlice;
-use cudart_sys::{cudaMemcpyToSymbol, CudaMemoryCopyKind};
+use cudart_sys::{cudaGetSymbolAddress, cudaMemcpyToSymbol, CudaMemoryCopyKind};
 use std::mem::size_of;
 use std::os::raw::c_void;
 
@@ -48,10 +48,22 @@ impl PowersData {
     }
 }
 
+const FINEST_LOG_COUNT: usize = 7;
+const COARSER_LOG_COUNT: usize = 8;
+const COARSEST_LOG_COUNT: usize = 6;
+
 extern "C" {
     static powers_data_w: PowersData;
     static powers_data_w_bitrev_for_ntt: PowersData;
     static powers_data_w_inv_bitrev_for_ntt: PowersData;
+
+    static ntt_w_powers_bitrev_finest: [GoldilocksField; 1 << FINEST_LOG_COUNT];
+    static ntt_w_powers_bitrev_coarser: [GoldilocksField; 1 << COARSER_LOG_COUNT];
+    static ntt_w_powers_bitrev_coarsest: [GoldilocksField; 1 << COARSEST_LOG_COUNT];
+    static ntt_w_inv_powers_bitrev_finest: [GoldilocksField; 1 << FINEST_LOG_COUNT];
+    static ntt_w_inv_powers_bitrev_coarser: [GoldilocksField; 1 << COARSER_LOG_COUNT];
+    static ntt_w_inv_powers_bitrev_coarsest: [GoldilocksField; 1 << COARSEST_LOG_COUNT];
+
     static powers_data_g_f: PowersData;
     static powers_data_g_i: PowersData;
     static inv_sizes: [GoldilocksField; OMEGA_LOG_ORDER as usize + 1];
@@ -152,6 +164,40 @@ fn generate_powers_dev(
     memory_copy(powers_dev, &powers_host)
 }
 
+fn populate_ntt_powers() -> CudaResult<()> {
+    let mut powers_host = [GoldilocksField::ONE; 1 << FINEST_LOG_COUNT];
+    let base = domain_generator_for_size::<GoldilocksField>(1u64 << OMEGA_LOG_ORDER);
+    // distribute_powers(&mut powers_host, base);
+    bitreverse_enumeration_inplace(&mut powers_host);
+    unsafe { copy_to_symbol(&ntt_w_powers_bitrev_finest, &powers_host)? };
+    let base = base.inverse().expect("must exist");
+    // distribute_powers(&mut powers_host, base);
+    bitreverse_enumeration_inplace(&mut powers_host);
+    unsafe { copy_to_symbol(&ntt_w_inv_powers_bitrev_finest, &powers_host)? };
+
+    let mut powers_host = [GoldilocksField::ONE; 1 << COARSER_LOG_COUNT];
+    let base = domain_generator_for_size::<GoldilocksField>(1u64 << (OMEGA_LOG_ORDER - FINEST_LOG_COUNT as u32));
+    // distribute_powers(&mut powers_host, base);
+    bitreverse_enumeration_inplace(&mut powers_host);
+    unsafe { copy_to_symbol(&ntt_w_powers_bitrev_coarser, &powers_host)? };
+    let base = base.inverse().expect("must exist");
+    // distribute_powers(&mut powers_host, base);
+    bitreverse_enumeration_inplace(&mut powers_host);
+    unsafe { copy_to_symbol(&ntt_w_inv_powers_bitrev_coarser, &powers_host)? };
+
+    let mut powers_host = [GoldilocksField::ONE; 1 << COARSEST_LOG_COUNT];
+    let base = domain_generator_for_size::<GoldilocksField>(1u64 << (COARSEST_LOG_COUNT + 1));
+    // distribute_powers(&mut powers_host, base);
+    bitreverse_enumeration_inplace(&mut powers_host);
+    unsafe { copy_to_symbol(&ntt_w_powers_bitrev_coarsest, &powers_host)? };
+    let base = base.inverse().expect("must exist");
+    // distribute_powers(&mut powers_host, base);
+    bitreverse_enumeration_inplace(&mut powers_host);
+    unsafe { copy_to_symbol(&ntt_w_inv_powers_bitrev_coarsest, &powers_host)? };
+
+    Ok(())
+}
+
 pub struct Context {
     pub powers_of_w_fine: DeviceAllocation<GoldilocksField>,
     pub powers_of_w_coarse: DeviceAllocation<GoldilocksField>,
@@ -172,6 +218,9 @@ impl Context {
     ) -> CudaResult<Self> {
         assert!(powers_of_w_coarse_log_count <= OMEGA_LOG_ORDER);
         assert!(powers_of_g_coarse_log_count <= OMEGA_LOG_ORDER);
+
+        populate_ntt_powers()?;
+
         let length_fine = 1usize << (OMEGA_LOG_ORDER - powers_of_w_coarse_log_count);
         let length_coarse = 1usize << powers_of_w_coarse_log_count;
         let mut powers_of_w_fine = DeviceAllocation::<GoldilocksField>::alloc(length_fine)?;

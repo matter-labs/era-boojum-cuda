@@ -25,13 +25,26 @@ __device__ __forceinline__ void exchg_dif(base_field &a, base_field &b, const ba
 // arrays are already bitreved.
 __device__ __forceinline__ base_field get_twiddle(const bool inverse, const unsigned i) {
   const powers_data &data = inverse ? powers_data_w_inv_bitrev_for_ntt : powers_data_w_bitrev_for_ntt;
-  unsigned fine_idx = (i >> data.coarse.log_count) & data.fine.mask;
-  unsigned coarse_idx = i & data.coarse.mask;
-  auto coarse = memory::load_ca(data.coarse.values + coarse_idx);
-  if (fine_idx == 0)
-    return coarse;
-  auto fine = memory::load_ca(data.fine.values + fine_idx);
-  return base_field::mul(fine, coarse);
+  constexpr unsigned finest_mask = (1 << FINEST_LOG_COUNT) - 1;
+  constexpr unsigned coarser_mask = (1 << COARSER_LOG_COUNT) - 1;
+  constexpr unsigned coarsest_mask = (1 << COARSEST_LOG_COUNT) - 1;
+  // unsigned fine_idx = (i >> data.coarse.log_count) & data.fine.mask;
+  // unsigned coarse_idx = i & data.coarse.mask;
+  const unsigned finest_idx = (i >> (COARSER_LOG_COUNT + COARSEST_LOG_COUNT)) & finest_mask;
+  const unsigned coarser_idx = (i >> COARSEST_LOG_COUNT) & coarser_mask;
+  const unsigned coarsest_idx = i & coarsest_mask;
+  // auto coarse = memory::load_ca(data.coarse.values + coarse_idx);
+  // auto twiddle = memory::load_ca(data.coarse.values + coarsest_idx);
+  auto twiddle = inverse ? ntt_w_inv_powers_bitrev_coarsest[coarsest_idx] : ntt_w_powers_bitrev_coarsest[coarsest_idx];
+  if (finest_idx == 0 && coarser_idx == 0)
+    return twiddle;
+  auto coarser = inverse ? ntt_w_inv_powers_bitrev_coarser[coarser_idx] : ntt_w_powers_bitrev_coarser[coarser_idx];
+  twiddle = base_field::mul(twiddle, coarser);
+  if (finest_idx == 0)
+    return twiddle;
+  auto finest = inverse ? ntt_w_inv_powers_bitrev_finest[finest_idx] : ntt_w_powers_bitrev_finest[finest_idx];
+  twiddle = base_field::mul(twiddle, finest);
+  return twiddle;
 }
 
 DEVICE_FORCEINLINE void shfl_xor_bf(base_field *vals, const unsigned i, const unsigned lane_id, const unsigned lane_mask) {
