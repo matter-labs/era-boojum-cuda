@@ -29,7 +29,7 @@ DEVICE_FORCEINLINE void b2n_initial_stages_warp(const base_field *gmem_inputs_ma
   for (unsigned ntt_idx = 0; ntt_idx < bound; ntt_idx++, gmem_in += stride_between_input_arrays, gmem_out += stride_between_output_arrays) {
 #pragma unroll
     for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
-      const auto in = memory::load_cs(reinterpret_cast<const uint4 *>(gmem_in + 64 * i + 2 * lane_id));
+      const auto in = memory::load_cg(reinterpret_cast<const uint4 *>(gmem_in + 64 * i + 2 * lane_id));
       vals[2 * i][0] = in.x;
       vals[2 * i][1] = in.y;
       vals[2 * i + 1][0] = in.z;
@@ -89,8 +89,8 @@ DEVICE_FORCEINLINE void b2n_initial_stages_warp(const base_field *gmem_inputs_ma
     for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
       // This output pattern (resulting from the above shfls) is nice, but not obvious.
       // To see why it works, sketch the shfl stages on paper.
-      memory::store_cs(gmem_out + 64 * i + lane_id, vals[2 * i]);
-      memory::store_cs(gmem_out + 64 * i + lane_id + 32, vals[2 * i + 1]);
+      memory::store_cg(gmem_out + 64 * i + lane_id, vals[2 * i]);
+      memory::store_cg(gmem_out + 64 * i + lane_id + 32, vals[2 * i + 1]);
     }
   }
 }
@@ -146,7 +146,7 @@ DEVICE_FORCEINLINE void b2n_initial_stages_block(const base_field *gmem_inputs_m
   for (unsigned ntt_idx = 0; ntt_idx < bound; ntt_idx++, gmem_in += stride_between_input_arrays, gmem_out += stride_between_output_arrays) {
 #pragma unroll
     for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
-      const auto pair = memory::load_cs(reinterpret_cast<const uint4 *>(gmem_in + 64 * i + 2 * lane_id));
+      const auto pair = memory::load_cg(reinterpret_cast<const uint4 *>(gmem_in + 64 * i + 2 * lane_id));
       vals[2 * i][0] = pair.x;
       vals[2 * i][1] = pair.y;
       vals[2 * i + 1][0] = pair.z;
@@ -306,8 +306,8 @@ DEVICE_FORCEINLINE void b2n_initial_stages_block(const base_field *gmem_inputs_m
 
 #pragma unroll
     for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
-      memory::store_cs(gmem_out + 4 * i * VALS_PER_WARP, vals[2 * i]);
-      memory::store_cs(gmem_out + (4 * i + 2) * VALS_PER_WARP, vals[2 * i + 1]);
+      memory::store_cg(gmem_out + 4 * i * VALS_PER_WARP, vals[2 * i]);
+      memory::store_cg(gmem_out + (4 * i + 2) * VALS_PER_WARP, vals[2 * i + 1]);
     }
   }
 }
@@ -373,15 +373,15 @@ DEVICE_FORCEINLINE void b2n_noninitial_stages_block(const base_field *gmem_input
       auto val0_addr = gmem_in + TILES_PER_WARP * tile_stride * warp_id + 2 * tile_stride * (lane_id >> 4) + 2 * (threadIdx.x & 7) + (lane_id >> 3 & 1);
 #pragma unroll
       for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
-        vals[2 * i] = memory::load_cs(val0_addr);
-        vals[2 * i + 1] = memory::load_cs(val0_addr + tile_stride);
+        vals[2 * i] = memory::load_cg(val0_addr);
+        vals[2 * i + 1] = memory::load_cg(val0_addr + tile_stride);
         val0_addr += 4 * tile_stride;
       }
     } else {
       auto pair_addr = gmem_in + TILES_PER_WARP * tile_stride * warp_id + tile_stride * (lane_id >> 3) + 2 * (threadIdx.x & 7);
 #pragma unroll
       for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
-        const auto pair = memory::load_cs(reinterpret_cast<const uint4 *>(pair_addr));
+        const auto pair = memory::load_cg(reinterpret_cast<const uint4 *>(pair_addr));
         vals[2 * i][0] = pair.x;
         vals[2 * i][1] = pair.y;
         vals[2 * i + 1][0] = pair.z;
@@ -512,16 +512,16 @@ DEVICE_FORCEINLINE void b2n_noninitial_stages_block(const base_field *gmem_input
         }
         auto power_of_g0 = get_power_of_g(idx0, true);
         auto power_of_g1 = get_power_of_g(idx1, true);
-        memory::store_cs(gmem_out - gmem_out_offset + idx0, base_field::mul(val0, power_of_g0));
-        memory::store_cs(gmem_out - gmem_out_offset + idx1, base_field::mul(val1, power_of_g1));
+        memory::store_cg(gmem_out - gmem_out_offset + idx0, base_field::mul(val0, power_of_g0));
+        memory::store_cg(gmem_out - gmem_out_offset + idx1, base_field::mul(val1, power_of_g1));
       }
       *scratch = tmp;
       __syncwarp();
     } else {
 #pragma unroll
       for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
-        memory::store_cs(gmem_out + 4 * i * tile_stride * WARPS_PER_BLOCK, vals[2 * i]);
-        memory::store_cs(gmem_out + (4 * i + 2) * tile_stride * WARPS_PER_BLOCK, vals[2 * i + 1]);
+        memory::store_cg(gmem_out + 4 * i * tile_stride * WARPS_PER_BLOCK, vals[2 * i]);
+        memory::store_cg(gmem_out + (4 * i + 2) * tile_stride * WARPS_PER_BLOCK, vals[2 * i + 1]);
       }
     }
   }
@@ -556,8 +556,8 @@ extern "C" __launch_bounds__(512, 2) __global__
   base_field *gmem_output = gmem_outputs_matrix + ntt_idx * stride_between_output_arrays;
 
   const auto twiddle = get_twiddle(inverse, exchg_region);
-  auto a = memory::load_cs(gmem_input + a_idx);
-  auto b = memory::load_cs(gmem_input + b_idx);
+  auto a = memory::load_cg(gmem_input + a_idx);
+  auto b = memory::load_cg(gmem_input + b_idx);
 
   if ((start_stage == 0) && log_extension_degree && !inverse) {
     const unsigned a_idx_brev = __brev(a_idx) >> (32 - log_n);
@@ -589,6 +589,6 @@ extern "C" __launch_bounds__(512, 2) __global__
     }
   }
 
-  memory::store_cs(gmem_output + a_idx, a);
-  memory::store_cs(gmem_output + b_idx, b);
+  memory::store_cg(gmem_output + a_idx, a);
+  memory::store_cg(gmem_output + b_idx, b);
 }

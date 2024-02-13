@@ -153,16 +153,16 @@ fn generate_powers_dev(
 }
 
 pub struct Context {
-    powers_of_w_fine: DeviceAllocation<GoldilocksField>,
-    powers_of_w_coarse: DeviceAllocation<GoldilocksField>,
-    powers_of_w_fine_bitrev_for_ntt: DeviceAllocation<GoldilocksField>,
-    powers_of_w_coarse_bitrev_for_ntt: DeviceAllocation<GoldilocksField>,
-    powers_of_w_inv_fine_bitrev_for_ntt: DeviceAllocation<GoldilocksField>,
-    powers_of_w_inv_coarse_bitrev_for_ntt: DeviceAllocation<GoldilocksField>,
-    powers_of_g_f_fine: DeviceAllocation<GoldilocksField>,
-    powers_of_g_f_coarse: DeviceAllocation<GoldilocksField>,
-    powers_of_g_i_fine: DeviceAllocation<GoldilocksField>,
-    powers_of_g_i_coarse: DeviceAllocation<GoldilocksField>,
+    pub powers_of_w_fine: DeviceAllocation<GoldilocksField>,
+    pub powers_of_w_coarse: DeviceAllocation<GoldilocksField>,
+    pub powers_of_w_fine_bitrev_for_ntt: DeviceAllocation<GoldilocksField>,
+    pub powers_of_w_coarse_bitrev_for_ntt: DeviceAllocation<GoldilocksField>,
+    pub powers_of_w_inv_fine_bitrev_for_ntt: DeviceAllocation<GoldilocksField>,
+    pub powers_of_w_inv_coarse_bitrev_for_ntt: DeviceAllocation<GoldilocksField>,
+    pub powers_of_g_f_fine: DeviceAllocation<GoldilocksField>,
+    pub powers_of_g_f_coarse: DeviceAllocation<GoldilocksField>,
+    pub powers_of_g_i_fine: DeviceAllocation<GoldilocksField>,
+    pub powers_of_g_i_coarse: DeviceAllocation<GoldilocksField>,
 }
 
 impl Context {

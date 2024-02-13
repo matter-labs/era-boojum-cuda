@@ -30,8 +30,8 @@ DEVICE_FORCEINLINE void n2b_final_stages_warp(const base_field *gmem_inputs_matr
   for (unsigned ntt_idx = 0; ntt_idx < bound; ntt_idx++, gmem_in += stride_between_input_arrays, gmem_out += stride_between_output_arrays) {
 #pragma unroll
     for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
-      vals[2 * i] = memory::load_cs(gmem_in + 64 * i + lane_id);
-      vals[2 * i + 1] = memory::load_cs(gmem_in + 64 * i + lane_id + 32);
+      vals[2 * i] = memory::load_cg(gmem_in + 64 * i + lane_id);
+      vals[2 * i + 1] = memory::load_cg(gmem_in + 64 * i + lane_id + 32);
     }
 
     base_field *twiddles_this_stage = twiddle_cache + VALS_PER_WARP - 2;
@@ -84,7 +84,7 @@ DEVICE_FORCEINLINE void n2b_final_stages_warp(const base_field *gmem_inputs_matr
 #pragma unroll
       for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
         const uint4 out{scratch[2 * i][0], scratch[2 * i][1], scratch[2 * i + 1][0], scratch[2 * i + 1][1]};
-        memory::store_cs(reinterpret_cast<uint4 *>(gmem_out + 64 * i + 2 * lane_id), out);
+        memory::store_cg(reinterpret_cast<uint4 *>(gmem_out + 64 * i + 2 * lane_id), out);
       }
 #pragma unroll
       for (unsigned i = 0; i < VALS_PER_THREAD; i++)
@@ -94,7 +94,7 @@ DEVICE_FORCEINLINE void n2b_final_stages_warp(const base_field *gmem_inputs_matr
 #pragma unroll
       for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
         const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
-        memory::store_cs(reinterpret_cast<uint4 *>(gmem_out + 64 * i + 2 * lane_id), out);
+        memory::store_cg(reinterpret_cast<uint4 *>(gmem_out + 64 * i + 2 * lane_id), out);
       }
     }
   }
@@ -150,8 +150,8 @@ DEVICE_FORCEINLINE void n2b_final_stages_block(const base_field *gmem_inputs_mat
   for (unsigned ntt_idx = 0; ntt_idx < bound; ntt_idx++, gmem_in += stride_between_input_arrays, gmem_out += stride_between_output_arrays) {
 #pragma unroll
     for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
-      vals[2 * i] = memory::load_cs(gmem_in + 4 * i * VALS_PER_WARP);
-      vals[2 * i + 1] = memory::load_cs(gmem_in + (4 * i + 2) * VALS_PER_WARP);
+      vals[2 * i] = memory::load_cg(gmem_in + 4 * i * VALS_PER_WARP);
+      vals[2 * i + 1] = memory::load_cg(gmem_in + (4 * i + 2) * VALS_PER_WARP);
     }
 
     const unsigned stages_to_skip = MAX_STAGES_THIS_LAUNCH - stages_this_launch;
@@ -295,7 +295,7 @@ DEVICE_FORCEINLINE void n2b_final_stages_block(const base_field *gmem_inputs_mat
 #pragma unroll
       for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
         const uint4 out{scratch[2 * i][0], scratch[2 * i][1], scratch[2 * i + 1][0], scratch[2 * i + 1][1]};
-        memory::store_cs(reinterpret_cast<uint4 *>(gmem_out + 64 * i + 2 * lane_id), out);
+        memory::store_cg(reinterpret_cast<uint4 *>(gmem_out + 64 * i + 2 * lane_id), out);
       }
 #pragma unroll
       for (unsigned i = 0; i < VALS_PER_THREAD; i++)
@@ -305,7 +305,7 @@ DEVICE_FORCEINLINE void n2b_final_stages_block(const base_field *gmem_inputs_mat
 #pragma unroll
       for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
         const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
-        memory::store_cs(reinterpret_cast<uint4 *>(gmem_out + 64 * i + 2 * lane_id), out);
+        memory::store_cg(reinterpret_cast<uint4 *>(gmem_out + 64 * i + 2 * lane_id), out);
       }
     }
   }
@@ -362,8 +362,8 @@ DEVICE_FORCEINLINE void n2b_nonfinal_stages_block(const base_field *gmem_inputs_
   for (unsigned ntt_idx = 0; ntt_idx < bound; ntt_idx++, gmem_in += stride_between_input_arrays, gmem_out += stride_between_output_arrays) {
 #pragma unroll
     for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
-      vals[2 * i] = memory::load_cs(gmem_in + 4 * i * tile_stride * WARPS_PER_BLOCK);
-      vals[2 * i + 1] = memory::load_cs(gmem_in + (4 * i + 2) * tile_stride * WARPS_PER_BLOCK);
+      vals[2 * i] = memory::load_cg(gmem_in + 4 * i * tile_stride * WARPS_PER_BLOCK);
+      vals[2 * i + 1] = memory::load_cg(gmem_in + (4 * i + 2) * tile_stride * WARPS_PER_BLOCK);
     }
 
     if ((start_stage == 0) && log_extension_degree && !inverse) {
@@ -500,8 +500,8 @@ DEVICE_FORCEINLINE void n2b_nonfinal_stages_block(const base_field *gmem_inputs_
       auto val0_addr = gmem_out + TILES_PER_WARP * tile_stride * warp_id + 2 * tile_stride * (lane_id >> 4) + 2 * (threadIdx.x & 7) + (lane_id >> 3 & 1);
 #pragma unroll
       for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
-        memory::store_cs(val0_addr, vals[2 * i]);
-        memory::store_cs(val0_addr + tile_stride, vals[2 * i + 1]);
+        memory::store_cg(val0_addr, vals[2 * i]);
+        memory::store_cg(val0_addr + tile_stride, vals[2 * i + 1]);
         val0_addr += 4 * tile_stride;
       }
     } else {
@@ -509,7 +509,7 @@ DEVICE_FORCEINLINE void n2b_nonfinal_stages_block(const base_field *gmem_inputs_
 #pragma unroll
       for (unsigned i = 0; i < PAIRS_PER_THREAD; i++) {
         const uint4 out{vals[2 * i][0], vals[2 * i][1], vals[2 * i + 1][0], vals[2 * i + 1][1]};
-        memory::store_cs(reinterpret_cast<uint4 *>(pair_addr), out);
+        memory::store_cg(reinterpret_cast<uint4 *>(pair_addr), out);
         pair_addr += 4 * tile_stride;
       }
     }
@@ -545,8 +545,8 @@ extern "C" __launch_bounds__(512, 2) __global__
   base_field *gmem_output = gmem_outputs_matrix + ntt_idx * stride_between_output_arrays;
 
   const auto twiddle = get_twiddle(inverse, exchg_region);
-  auto a = memory::load_cs(gmem_input + a_idx);
-  auto b = memory::load_cs(gmem_input + b_idx);
+  auto a = memory::load_cg(gmem_input + a_idx);
+  auto b = memory::load_cg(gmem_input + b_idx);
 
   if ((start_stage == 0) && log_extension_degree && !inverse) {
     if (coset_idx) {
@@ -578,6 +578,6 @@ extern "C" __launch_bounds__(512, 2) __global__
     }
   }
 
-  memory::store_cs(gmem_output + a_idx, a);
-  memory::store_cs(gmem_output + b_idx, b);
+  memory::store_cg(gmem_output + a_idx, a);
+  memory::store_cg(gmem_output + b_idx, b);
 }
