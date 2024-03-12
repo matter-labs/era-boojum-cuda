@@ -2,14 +2,29 @@
 
 namespace device_reduce {
 
-using namespace goldilocks;
-using namespace memory;
-
 struct offset_iterator {
   const int offset;
   const int stride;
+
   DEVICE_FORCEINLINE int operator[](const int idx) const { return offset + idx * stride; }
 };
+
+} // namespace device_reduce
+
+#if CUB_VERSION >= 200300
+namespace cuda::std {
+
+template <> struct iterator_traits<::device_reduce::offset_iterator> {
+  typedef int value_type;
+};
+
+} // namespace cuda::std
+#endif
+
+namespace device_reduce {
+
+using namespace goldilocks;
+using namespace memory;
 
 EXTERN cudaError_t reduce_add_bf(void *d_temp_storage, size_t &temp_storage_bytes, const base_field *d_in, base_field *d_out, int num_items,
                                  cudaStream_t stream) {
