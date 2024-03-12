@@ -27,9 +27,8 @@ template <typename T, ld_modifier MODIFIER> static constexpr DEVICE_FORCEINLINE 
   case ld_modifier::cv:
     return __ldcv(ptr);
   }
-#else
-  return *ptr;
 #endif
+  return *ptr;
 }
 
 enum class st_modifier { none, wb, cg, cs, wt };
@@ -53,9 +52,8 @@ template <typename T, st_modifier MODIFIER> static constexpr DEVICE_FORCEINLINE 
     __stwt(ptr, value);
     break;
   }
-#else
-  *ptr = value;
 #endif
+  *ptr = value;
 }
 
 template <typename T> DEVICE_FORCEINLINE void swap(T &a, T &b) {
