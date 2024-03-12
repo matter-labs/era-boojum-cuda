@@ -66,6 +66,7 @@ template <unsigned LIMBS_COUNT> struct __align__(LIMBS_ALIGNMENT(LIMBS_COUNT)) f
       return {1, ~1u};
     default:
       static_assert(LIMBS_COUNT >= 2 && LIMBS_COUNT <= 4);
+      return {};
     }
   }
 
@@ -82,6 +83,7 @@ template <unsigned LIMBS_COUNT> struct __align__(LIMBS_ALIGNMENT(LIMBS_COUNT)) f
       return {flag & 1, flag & ~1};
     default:
       static_assert(LIMBS_COUNT >= 2 && LIMBS_COUNT <= 4);
+      return {};
     }
   }
 
