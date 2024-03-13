@@ -3,25 +3,19 @@
 namespace device_reduce {
 
 struct offset_iterator {
+#if CUB_VERSION >= 200300
+  using iterator_category = cuda::std::random_access_iterator_tag;
+  using value_type = int;
+  using difference_type = int;
+  using pointer = int *;
+  using reference = int &;
+#endif
+
   const int offset;
   const int stride;
 
   DEVICE_FORCEINLINE int operator[](const int idx) const { return offset + idx * stride; }
 };
-
-} // namespace device_reduce
-
-#if CUB_VERSION >= 200300
-namespace cuda::std {
-
-template <> struct iterator_traits<::device_reduce::offset_iterator> {
-  typedef int value_type;
-};
-
-} // namespace cuda::std
-#endif
-
-namespace device_reduce {
 
 using namespace goldilocks;
 using namespace memory;
