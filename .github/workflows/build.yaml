@@ -2,16 +2,16 @@ name: Boojum CUDA build and test
 
 on:
   pull_request:
-    branches: [main]
+    branches: [ main ]
   push:
-    branches: [main]
+    branches: [ main ]
 
 jobs:
   boojum-build:
-    runs-on: [ubuntu-latest]
+    runs-on: [ ubuntu-latest ]
     strategy:
       matrix:
-        cuda: ["12.2.0-devel-ubuntu20.04", "12.0.0-devel-ubuntu20.04"]
+        cuda: [ "12.4.0-devel-ubuntu20.04", "12.0.0-devel-ubuntu20.04" ]
     container:
       image: nvidia/cuda:${{ matrix.cuda }}
     steps:
@@ -71,7 +71,7 @@ jobs:
           if-no-files-found: error
 
   boojum-test:
-    runs-on: [matterlabs-ci-gpu-runner]
+    runs-on: [ matterlabs-ci-gpu-runner ]
     needs: boojum-build
     steps:
       - name: Prepare environment
@@ -82,11 +82,11 @@ jobs:
         run: |
           nvidia-smi
 
-      - name: Download test binaries built with CUDA 12.2
+      - name: Download test binaries built with CUDA 12.4
         uses: actions/download-artifact@v3
         with:
-          name: boojum-cuda-12.2.0-devel-ubuntu20.04-test-binaries
-          path: boojum-cuda-test-binaries/12.2
+          name: boojum-cuda-12.4.0-devel-ubuntu20.04-test-binaries
+          path: boojum-cuda-test-binaries/12.4
 
       - name: Download test binaries built with CUDA 12.0
         uses: actions/download-artifact@v3
@@ -94,17 +94,17 @@ jobs:
           name: boojum-cuda-12.0.0-devel-ubuntu20.04-test-binaries
           path: boojum-cuda-test-binaries/12.0
 
-      - name: Run test binaries built with CUDA 12.2
-        id: test_cuda_12_2
+      - name: Run test binaries built with CUDA 12.4
+        id: test_cuda_12_4
         continue-on-error: true
         run: |
-          for binary in boojum-cuda-test-binaries/12.2/*; do
+          for binary in boojum-cuda-test-binaries/12.4/*; do
             chmod +x $binary
             $binary
           done
 
       - name: Run test binaries built with CUDA 12.0
-        if: steps.test_cuda_12_2.outcome == 'failure' || steps.test_cuda_12_2.outcome == 'success'
+        if: steps.test_cuda_12_4.outcome == 'failure' || steps.test_cuda_12_4.outcome == 'success'
         run: |
           for binary in boojum-cuda-test-binaries/12.0/*; do
             chmod +x $binary
