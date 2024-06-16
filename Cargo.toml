@@ -9,24 +9,24 @@ license = "MIT OR Apache-2.0"
 boojum = { git = "https://github.com/matter-labs/era-boojum.git", branch = "main" }
 cudart-sys = { git = "https://github.com/matter-labs/era-cuda.git", branch = "main", package = "cudart-sys" }
 cmake = "0.1"
-itertools = "0.12"
+itertools = "0.13"
 
 [dependencies]
 boojum = { git = "https://github.com/matter-labs/era-boojum.git", branch = "main" }
 cudart = { git = "https://github.com/matter-labs/era-cuda.git", branch = "main", package = "cudart" }
 cudart-sys = { git = "https://github.com/matter-labs/era-cuda.git", branch = "main", package = "cudart-sys" }
-itertools = "0.12"
+itertools = "0.13"
 lazy_static = "1.4"
 
 [dev-dependencies]
 blake2 = "0.10"
-criterion = "0.4"
+criterion = "0.5"
 criterion-cuda = { git = "https://github.com/matter-labs/era-cuda.git", branch = "main", package = "criterion-cuda" }
 criterion-macro = "0.4"
-itertools = "0.12"
+itertools = "0.13"
 rand = "0.8"
-rayon = "1.8"
-serial_test = "3.0"
+rayon = "1.10"
+serial_test = "3.1"
 
 [[bench]]
 name = "blake2s"
