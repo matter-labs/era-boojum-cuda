@@ -1,7 +1,6 @@
 #![allow(incomplete_features)]
 #![feature(allocator_api)]
 #![feature(generic_const_exprs)]
-#![feature(inline_const)]
 #![feature(iter_array_chunks)]
 #![feature(macro_metavar_expr)]
 #![feature(specialization)]

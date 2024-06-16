@@ -11,7 +11,7 @@ jobs:
     runs-on: [ ubuntu-latest ]
     strategy:
       matrix:
-        cuda: [ "12.4.0-devel-ubuntu20.04", "12.0.0-devel-ubuntu20.04" ]
+        cuda: [ "12.0.0-devel-ubuntu20.04", "12.5.0-devel-ubuntu20.04" ]
     container:
       image: nvidia/cuda:${{ matrix.cuda }}
     steps:
@@ -49,15 +49,15 @@ jobs:
       - name: Setup rust
         run: |
           rustup set profile minimal
-          rustup toolchain install nightly-2023-08-21
-          rustup default nightly-2023-08-21
+          rustup toolchain install nightly-2024-05-07
+          rustup default nightly-2024-05-07
 
       - name: Build tests and copy binaries to a separate dir
         shell: bash
         run: |
           mkdir artifacts
           CUDAARCHS=80 CARGO_TARGET_DIR=./build \
-          cargo +nightly-2023-08-21 test --no-run --release --message-format=json -q \
+          cargo +nightly-2024-05-07 test --no-run --release --message-format=json -q \
           | jq -r 'select(.executable != null) | .executable' \
           | while read binary; do
             cp "$binary" artifacts/
@@ -82,29 +82,29 @@ jobs:
         run: |
           nvidia-smi
 
-      - name: Download test binaries built with CUDA 12.4
-        uses: actions/download-artifact@v3
-        with:
-          name: boojum-cuda-12.4.0-devel-ubuntu20.04-test-binaries
-          path: boojum-cuda-test-binaries/12.4
-
       - name: Download test binaries built with CUDA 12.0
         uses: actions/download-artifact@v3
         with:
           name: boojum-cuda-12.0.0-devel-ubuntu20.04-test-binaries
           path: boojum-cuda-test-binaries/12.0
 
-      - name: Run test binaries built with CUDA 12.4
-        id: test_cuda_12_4
+      - name: Download test binaries built with CUDA 12.5
+        uses: actions/download-artifact@v3
+        with:
+          name: boojum-cuda-12.5.0-devel-ubuntu20.04-test-binaries
+          path: boojum-cuda-test-binaries/12.5
+
+      - name: Run test binaries built with CUDA 12.5
+        id: test_cuda_12_5
         continue-on-error: true
         run: |
-          for binary in boojum-cuda-test-binaries/12.4/*; do
+          for binary in boojum-cuda-test-binaries/12.5/*; do
             chmod +x $binary
             $binary
           done
 
       - name: Run test binaries built with CUDA 12.0
-        if: steps.test_cuda_12_4.outcome == 'failure' || steps.test_cuda_12_4.outcome == 'success'
+        if: steps.test_cuda_12_5.outcome == 'failure' || steps.test_cuda_12_5.outcome == 'success'
         run: |
           for binary in boojum-cuda-test-binaries/12.0/*; do
             chmod +x $binary
