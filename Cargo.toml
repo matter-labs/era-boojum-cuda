@@ -3,18 +3,24 @@ name = "boojum-cuda"
 version = "0.1.0"
 edition = "2021"
 build = "build/main.rs"
+authors = ["The Matter Labs Team <hello@matterlabs.dev>"]
+homepage = "https://zksync.io/"
+repository = "https://github.com/matter-labs/era-boojum-cuda"
 license = "MIT OR Apache-2.0"
+keywords = ["blockchain", "zksync"]
+categories = ["cryptography"]
+description = "Boojum-CUDA is a library implementing GPU-accelerated cryptographic functionality for the zkSync prover"
 
 [build-dependencies]
-boojum = { git = "https://github.com/matter-labs/era-boojum.git", branch = "main" }
-cudart-sys = { git = "https://github.com/matter-labs/era-cuda.git", branch = "main", package = "cudart-sys" }
+boojum = "=0.2.0"
+cudart-sys = { version = "=0.1.0", package = "era_cudart_sys" }
 cmake = "0.1"
 itertools = "0.13"
 
 [dependencies]
-boojum = { git = "https://github.com/matter-labs/era-boojum.git", branch = "main" }
-cudart = { git = "https://github.com/matter-labs/era-cuda.git", branch = "main", package = "cudart" }
-cudart-sys = { git = "https://github.com/matter-labs/era-cuda.git", branch = "main", package = "cudart-sys" }
+boojum = "=0.2.0"
+cudart = { version = "=0.1.0", package = "era_cudart" }
+cudart-sys = { version = "=0.1.0", package = "era_cudart_sys" }
 itertools = "0.13"
 lazy_static = "1.4"
 

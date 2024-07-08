@@ -106,7 +106,8 @@ dependencies = [
 [[package]]
 name = "boojum"
 version = "0.2.0"
-source = "git+https://github.com/matter-labs/era-boojum.git?branch=main#4bcb11f0610302110ae8109af01d5b652191b2f6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f0c2cba247d620ff76123efb335401aa05ec5639551e6ef4e5f977c0809b5cb"
 dependencies = [
  "arrayvec",
  "bincode",
@@ -128,7 +129,7 @@ dependencies = [
  "rayon",
  "serde",
  "sha2",
- "sha3",
+ "sha3_ce",
  "smallvec",
  "unroll",
 ]
@@ -143,8 +144,8 @@ dependencies = [
  "criterion",
  "criterion-cuda",
  "criterion-macro",
- "cudart",
- "cudart-sys",
+ "era_cudart",
+ "era_cudart_sys",
  "itertools 0.13.0",
  "lazy_static",
  "rand 0.8.5",
@@ -452,8 +453,9 @@ dependencies = [
 
 [[package]]
 name = "cs_derive"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/era-boojum.git?branch=main#4bcb11f0610302110ae8109af01d5b652191b2f6"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "faa0b8f9fdb5c91dcd5569cc7cbc11f514fd784a34988ead8455db0db2cfc1c7"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -513,6 +515,27 @@ name = "equivalent"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
+
+[[package]]
+name = "era_cudart"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1725b17e5e41b89f566ace3900f119fdc87f04e2daa8e253b668573ad67a454f"
+dependencies = [
+ "bitflags",
+ "era_cudart_sys",
+ "paste",
+]
+
+[[package]]
+name = "era_cudart_sys"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60d46683f8a9a5364874f95b00073f6dc93d33e9a019f150b0d6ce09ffc13251"
+dependencies = [
+ "bindgen",
+ "serde_json",
+]
 
 [[package]]
 name = "errno"
@@ -862,9 +885,9 @@ dependencies = [
 
 [[package]]
 name = "lazy_static"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lazycell"
@@ -994,8 +1017,9 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "pairing_ce"
-version = "0.28.5"
-source = "git+https://github.com/matter-labs/pairing.git#d24f2c5871089c4cd4f54c0ca266bb9fef6115eb"
+version = "0.28.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "843b5b6fb63f00460f611dbc87a50bbbb745f0dfe5cbf67ca89299c79098640e"
 dependencies = [
  "byteorder",
  "cfg-if",
@@ -1449,9 +1473,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha3"
+name = "sha3_ce"
 version = "0.10.6"
-source = "git+https://github.com/RustCrypto/hashes.git?rev=7a187e934c1f6c68e4b4e5cf37541b7a0d64d303#7a187e934c1f6c68e4b4e5cf37541b7a0d64d303"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34c9a08202c50378d8a07a5f458193a5f542d2828ac6640263dbc0c2533ea25e"
 dependencies = [
  "digest",
  "keccak",
