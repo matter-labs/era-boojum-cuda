@@ -5,9 +5,9 @@ use boojum::field::goldilocks::GoldilocksField;
 use cudart::result::{CudaResult, CudaResultWrap};
 use cudart::slice::DeviceSlice;
 use cudart::stream::CudaStream;
-use cudart_sys::{cudaError_t, cudaStream_t};
+use cudart_sys::{cudaError_t, cudaStream_t, cuda_fn_and_stub};
 
-extern "C" {
+cuda_fn_and_stub! {
     fn sort_keys_u32(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -18,7 +18,9 @@ extern "C" {
         end_bit: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn sort_keys_descending_u32(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -29,7 +31,9 @@ extern "C" {
         end_bit: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn sort_keys_u64(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -40,7 +44,9 @@ extern "C" {
         end_bit: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn sort_keys_descending_u64(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -200,7 +206,7 @@ pub fn sort_keys<T: SortKeys>(
     )
 }
 
-extern "C" {
+cuda_fn_and_stub! {
     fn sort_pairs_u32_by_u32(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -213,7 +219,9 @@ extern "C" {
         end_bit: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn sort_pairs_descending_u32_by_u32(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -226,7 +234,9 @@ extern "C" {
         end_bit: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn sort_pairs_u32_by_u64(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -239,7 +249,9 @@ extern "C" {
         end_bit: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn sort_pairs_descending_u32_by_u64(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -252,7 +264,9 @@ extern "C" {
         end_bit: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn sort_pairs_u64_by_u32(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -265,7 +279,9 @@ extern "C" {
         end_bit: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn sort_pairs_descending_u64_by_u32(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -278,7 +294,9 @@ extern "C" {
         end_bit: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn sort_pairs_u64_by_u64(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -291,7 +309,9 @@ extern "C" {
         end_bit: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn sort_pairs_descending_u64_by_u64(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,

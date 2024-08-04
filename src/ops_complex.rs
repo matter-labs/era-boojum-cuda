@@ -1485,7 +1485,7 @@ mod tests {
         let stream = CudaStream::default();
         let base_ef =
             ExtensionField::from_coeff_in_base([GoldilocksField(42), GoldilocksField(42)]);
-        let base_vf = unsafe { mem::transmute(base_ef) };
+        let base_vf = unsafe { mem::transmute::<ExtensionField, EF>(base_ef) };
         let mut d_base = DeviceAllocation::alloc(1).unwrap();
         memory_copy_async(&mut d_base, &[base_vf], &stream).unwrap();
         let b = &d_base[0];

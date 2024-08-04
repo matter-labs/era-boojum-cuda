@@ -57,7 +57,7 @@ struct GateData {
     kernel: GateEvalSignature,
 }
 
-include!("gates_data.rs");
+include!(concat!(env!("OUT_DIR"), "/gates_data.rs"));
 
 pub fn find_gate_id_by_name(name: &str) -> Option<u32> {
     HASH_MAP.get(name).copied()

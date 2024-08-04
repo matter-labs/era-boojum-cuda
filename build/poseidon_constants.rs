@@ -5,7 +5,7 @@ use boojum::implementations::poseidon_goldilocks_params::*;
 // use itertools::Itertools;
 
 const TEMPLATE_PATH: &str = "native/poseidon_constants_template.cuh";
-const RESULT_PATH: &str = "native/poseidon_constants.cuh";
+const RESULT_PATH: &str = "poseidon_constants.cuh";
 
 fn split_u64(value: u64) -> (u32, u32) {
     let lo = value as u32;

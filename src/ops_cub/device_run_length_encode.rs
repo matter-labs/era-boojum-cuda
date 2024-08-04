@@ -5,9 +5,9 @@ use boojum::field::goldilocks::GoldilocksField;
 use cudart::result::{CudaResult, CudaResultWrap};
 use cudart::slice::{DeviceSlice, DeviceVariable};
 use cudart::stream::CudaStream;
-use cudart_sys::{cudaError_t, cudaStream_t};
+use cudart_sys::{cudaError_t, cudaStream_t, cuda_fn_and_stub};
 
-extern "C" {
+cuda_fn_and_stub! {
     fn encode_u32(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -18,7 +18,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn encode_u64(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,

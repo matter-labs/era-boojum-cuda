@@ -5,14 +5,14 @@ use boojum::field::goldilocks::GoldilocksField;
 use cudart::result::{CudaResult, CudaResultWrap};
 use cudart::slice::{DeviceSlice, DeviceVariable};
 use cudart::stream::CudaStream;
-use cudart_sys::{cudaError_t, cudaStream_t};
+use cudart_sys::{cudaError_t, cudaStream_t, cuda_fn_and_stub};
 
 use crate::device_structures::{
     DeviceMatrixChunkImpl, DeviceRepr, DeviceVectorChunkImpl, PtrAndStride,
 };
 use crate::extension_field::ExtensionField;
 
-extern "C" {
+cuda_fn_and_stub! {
     fn reduce_add_bf(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -21,7 +21,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn reduce_add_ef(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -30,7 +32,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn segmented_reduce_add_bf(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -40,7 +44,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn segmented_reduce_add_ef(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -50,7 +56,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn reduce_mul_bf(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -59,7 +67,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn reduce_mul_ef(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -68,7 +78,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn segmented_reduce_mul_bf(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -78,7 +90,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn segmented_reduce_mul_ef(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,

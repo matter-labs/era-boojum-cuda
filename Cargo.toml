@@ -13,21 +13,21 @@ description = "Boojum-CUDA is a library implementing GPU-accelerated cryptograph
 
 [build-dependencies]
 boojum = "=0.2.1"
-cudart-sys = { version = "=0.1.0", package = "era_cudart_sys" }
+cudart-sys = { git = "https://github.com/matter-labs/era-cuda.git", branch = "rr-build-refactor", package = "era_cudart_sys" }
 cmake = "0.1"
 itertools = "0.13"
 
 [dependencies]
 boojum = "=0.2.1"
-cudart = { version = "=0.1.0", package = "era_cudart" }
-cudart-sys = { version = "=0.1.0", package = "era_cudart_sys" }
+cudart = { git = "https://github.com/matter-labs/era-cuda.git", branch = "rr-build-refactor", package = "era_cudart" }
+cudart-sys = { git = "https://github.com/matter-labs/era-cuda.git", branch = "rr-build-refactor" , package = "era_cudart_sys"  }
 itertools = "0.13"
 lazy_static = "1.4"
 
 [dev-dependencies]
 blake2 = "0.10"
 criterion = "0.5"
-criterion-cuda = { git = "https://github.com/matter-labs/era-cuda.git", branch = "main", package = "criterion-cuda" }
+criterion-cuda = { git = "https://github.com/matter-labs/era-cuda.git", branch = "rr-build-refactor", package = "era_criterion_cuda" }
 criterion-macro = "0.4"
 itertools = "0.13"
 rand = "0.8"
