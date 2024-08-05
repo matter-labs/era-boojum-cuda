@@ -185,6 +185,7 @@ cuda_fn_and_stub! {
         stream: cudaStream_t,
     ) -> cudaError_t;
 }
+
 cuda_fn_and_stub! {
     fn exclusive_scan_mul_ef(
         d_temp_storage: *mut u8,
