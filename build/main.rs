@@ -12,11 +12,11 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(no_cuda)");
     #[cfg(no_cuda)]
     {
-        println!("cargo::warning={}", cudart_sys::no_cuda_message!());
+        println!("cargo::warning={}", era_cudart_sys::no_cuda_message!());
     }
     #[cfg(not(no_cuda))]
     {
-        use cudart_sys::{get_cuda_lib_path, get_cuda_version};
+        use era_cudart_sys::{get_cuda_lib_path, get_cuda_version};
         use std::env::var;
         let cuda_version = get_cuda_version().expect("Failed to determine CUDA version");
         if !cuda_version.starts_with("12.") {
@@ -29,7 +29,7 @@ fn main() {
             .build();
         let boojum_lib_path = dst.to_str().unwrap();
         println!("cargo:rustc-link-search=native={boojum_lib_path}");
-        println!("cargo:rustc-link-lib=static=boojum-cuda-native");
+        println!("cargo:rustc-link-lib=static=era_boojum_cuda_native");
         let cuda_lib_path = get_cuda_lib_path().unwrap();
         let cuda_lib_path_str = cuda_lib_path.to_str().unwrap();
         println!("cargo:rustc-link-search=native={cuda_lib_path_str}");

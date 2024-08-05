@@ -1,12 +1,12 @@
-use cudart::cuda_kernel;
-use cudart::device::{device_get_attribute, get_device};
-use cudart::execution::{CudaLaunchConfig, KernelFunction};
-use cudart::memory::memory_set_async;
-use cudart::occupancy::max_active_blocks_per_multiprocessor;
-use cudart::result::CudaResult;
-use cudart::slice::{DeviceSlice, DeviceVariable};
-use cudart::stream::CudaStream;
-use cudart_sys::CudaDeviceAttr;
+use era_cudart::cuda_kernel;
+use era_cudart::device::{device_get_attribute, get_device};
+use era_cudart::execution::{CudaLaunchConfig, KernelFunction};
+use era_cudart::memory::memory_set_async;
+use era_cudart::occupancy::max_active_blocks_per_multiprocessor;
+use era_cudart::result::CudaResult;
+use era_cudart::slice::{DeviceSlice, DeviceVariable};
+use era_cudart::stream::CudaStream;
+use era_cudart_sys::CudaDeviceAttr;
 
 use crate::utils::WARP_SIZE;
 
@@ -44,8 +44,8 @@ pub fn blake2s_pow(
 #[cfg(test)]
 mod tests {
     use blake2::{Blake2s256, Digest};
-    use cudart::memory::{memory_copy_async, DeviceAllocation};
-    use cudart::stream::CudaStream;
+    use era_cudart::memory::{memory_copy_async, DeviceAllocation};
+    use era_cudart::stream::CudaStream;
 
     #[test]
     fn blake2s_pow() {

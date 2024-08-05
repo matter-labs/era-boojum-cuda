@@ -2,10 +2,10 @@ use boojum::cs::implementations::utils::domain_generator_for_size;
 use boojum::fft::{bitreverse_enumeration_inplace, distribute_powers};
 use boojum::field::goldilocks::GoldilocksField;
 use boojum::field::{Field, PrimeField};
-use cudart::memory::{memory_copy, DeviceAllocation};
-use cudart::result::{CudaResult, CudaResultWrap};
-use cudart::slice::DeviceSlice;
-use cudart_sys::{cudaMemcpyToSymbol, cuda_struct_and_stub, CudaMemoryCopyKind};
+use era_cudart::memory::{memory_copy, DeviceAllocation};
+use era_cudart::result::{CudaResult, CudaResultWrap};
+use era_cudart::slice::DeviceSlice;
+use era_cudart_sys::{cudaMemcpyToSymbol, cuda_struct_and_stub, CudaMemoryCopyKind};
 use std::mem::size_of;
 use std::os::raw::c_void;
 

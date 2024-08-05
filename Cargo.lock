@@ -112,25 +112,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "boojum-cuda"
-version = "0.1.1"
-dependencies = [
- "blake2",
- "boojum",
- "cmake",
- "criterion",
- "criterion-macro",
- "era_criterion_cuda",
- "era_cudart",
- "era_cudart_sys",
- "itertools 0.13.0",
- "lazy_static",
- "rand 0.8.5",
- "rayon",
- "serial_test",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -446,9 +427,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
+name = "era_boojum_cuda"
+version = "0.2.0"
+dependencies = [
+ "blake2",
+ "boojum",
+ "cmake",
+ "criterion",
+ "criterion-macro",
+ "era_criterion_cuda",
+ "era_cudart",
+ "era_cudart_sys",
+ "itertools 0.13.0",
+ "lazy_static",
+ "rand 0.8.5",
+ "rayon",
+ "serial_test",
+]
+
+[[package]]
 name = "era_criterion_cuda"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/era-cuda.git?branch=rr-build-refactor#160d7fa3038cf56e59bc90bf5399afa69841780f"
+version = "0.2.0"
+source = "git+https://github.com/matter-labs/era-cuda.git?branch=rr-build-refactor#70cb1fe932a82e0b69196fd446c245b48617485e"
 dependencies = [
  "criterion",
  "era_cudart",
@@ -456,8 +456,8 @@ dependencies = [
 
 [[package]]
 name = "era_cudart"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/era-cuda.git?branch=rr-build-refactor#160d7fa3038cf56e59bc90bf5399afa69841780f"
+version = "0.2.0"
+source = "git+https://github.com/matter-labs/era-cuda.git?branch=rr-build-refactor#70cb1fe932a82e0b69196fd446c245b48617485e"
 dependencies = [
  "bitflags",
  "era_cudart_sys",
@@ -466,8 +466,8 @@ dependencies = [
 
 [[package]]
 name = "era_cudart_sys"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/era-cuda.git?branch=rr-build-refactor#160d7fa3038cf56e59bc90bf5399afa69841780f"
+version = "0.2.0"
+source = "git+https://github.com/matter-labs/era-cuda.git?branch=rr-build-refactor#70cb1fe932a82e0b69196fd446c245b48617485e"
 dependencies = [
  "serde_json",
 ]

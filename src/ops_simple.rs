@@ -5,13 +5,13 @@ use crate::device_structures::{
 use crate::extension_field::VectorizedExtensionField;
 use crate::utils::{get_grid_block_dims_for_threads_count, WARP_SIZE};
 use crate::BaseField;
-use cudart::execution::{CudaLaunchConfig, Dim3, KernelFunction};
-use cudart::memory::memory_set_async;
-use cudart::paste::paste;
-use cudart::result::CudaResult;
-use cudart::slice::DeviceSlice;
-use cudart::stream::CudaStream;
-use cudart::{cuda_kernel_declaration, cuda_kernel_signature_arguments_and_function};
+use era_cudart::execution::{CudaLaunchConfig, Dim3, KernelFunction};
+use era_cudart::memory::memory_set_async;
+use era_cudart::paste::paste;
+use era_cudart::result::CudaResult;
+use era_cudart::slice::DeviceSlice;
+use era_cudart::stream::CudaStream;
+use era_cudart::{cuda_kernel_declaration, cuda_kernel_signature_arguments_and_function};
 
 type BF = BaseField;
 type EF = VectorizedExtensionField;
@@ -697,10 +697,10 @@ ternary_ops_impl!(EF, EF, EF, EF);
 mod tests {
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::field::{Field, PrimeField, U64Representable};
-    use cudart::memory::{memory_copy_async, DeviceAllocation};
-    use cudart::result::CudaResult;
-    use cudart::slice::DeviceSlice;
-    use cudart::stream::CudaStream;
+    use era_cudart::memory::{memory_copy_async, DeviceAllocation};
+    use era_cudart::result::CudaResult;
+    use era_cudart::slice::DeviceSlice;
+    use era_cudart::stream::CudaStream;
     use itertools::Itertools;
     use std::ops::{Add, Mul, Sub};
 

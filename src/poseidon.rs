@@ -5,11 +5,11 @@ use crate::utils::{get_grid_block_dims_for_threads_count, WARP_SIZE};
 use crate::BaseField;
 use boojum::field::goldilocks::GoldilocksField;
 use boojum::implementations::poseidon_goldilocks_params::*;
-use cudart::cuda_kernel;
-use cudart::execution::{CudaLaunchConfig, Dim3, KernelFunction};
-use cudart::result::CudaResult;
-use cudart::slice::DeviceSlice;
-use cudart::stream::CudaStream;
+use era_cudart::cuda_kernel;
+use era_cudart::execution::{CudaLaunchConfig, Dim3, KernelFunction};
+use era_cudart::result::CudaResult;
+use era_cudart::slice::DeviceSlice;
+use era_cudart::stream::CudaStream;
 
 type BF = BaseField;
 
@@ -397,8 +397,8 @@ mod tests {
     use itertools::Itertools;
     use rand::Rng;
 
-    use cudart::memory::{memory_copy_async, DeviceAllocation};
-    use cudart::slice::CudaSlice;
+    use era_cudart::memory::{memory_copy_async, DeviceAllocation};
+    use era_cudart::slice::CudaSlice;
 
     // use boojum::implementations::poseidon_goldilocks::poseidon_permutation_optimized;
     use crate::device_structures::{DeviceMatrix, DeviceMatrixMut};

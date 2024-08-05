@@ -2,11 +2,11 @@ use std::ptr::null_mut;
 
 use boojum::field::goldilocks::GoldilocksField;
 
-use cudart::event::{CudaEvent, CudaEventCreateFlags};
-use cudart::result::{CudaResult, CudaResultWrap};
-use cudart::slice::DeviceSlice;
-use cudart::stream::{CudaStream, CudaStreamCreateFlags, CudaStreamWaitEventFlags};
-use cudart_sys::{cudaError_t, cudaStream_t, cuda_fn_and_stub};
+use era_cudart::event::{CudaEvent, CudaEventCreateFlags};
+use era_cudart::result::{CudaResult, CudaResultWrap};
+use era_cudart::slice::DeviceSlice;
+use era_cudart::stream::{CudaStream, CudaStreamCreateFlags, CudaStreamWaitEventFlags};
+use era_cudart_sys::{cudaError_t, cudaStream_t, cuda_fn_and_stub};
 
 use crate::extension_field::ExtensionField;
 
@@ -694,8 +694,8 @@ mod tests {
     use rand::distributions::Uniform;
     use rand::{thread_rng, Rng};
 
-    use cudart::memory::{memory_copy_async, DeviceAllocation};
-    use cudart::stream::CudaStream;
+    use era_cudart::memory::{memory_copy_async, DeviceAllocation};
+    use era_cudart::stream::CudaStream;
 
     use crate::extension_field::ExtensionField;
     use crate::ops_cub::device_scan::{get_scan_temp_storage_bytes, Scan};

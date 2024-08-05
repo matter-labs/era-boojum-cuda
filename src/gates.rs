@@ -8,10 +8,10 @@ use crate::BaseField;
 use boojum::cs::traits::evaluator::GateConstraintEvaluator;
 use boojum::cs::traits::gate::Gate;
 use boojum::gpu_synthesizer::get_evaluator_name;
-use cudart::cuda_kernel;
-use cudart::execution::{CudaLaunchConfig, KernelFunction};
-use cudart::result::CudaResult;
-use cudart::stream::CudaStream;
+use era_cudart::cuda_kernel;
+use era_cudart::execution::{CudaLaunchConfig, KernelFunction};
+use era_cudart::result::CudaResult;
+use era_cudart::stream::CudaStream;
 use std::mem::size_of;
 
 type BF = BaseField;
@@ -243,8 +243,8 @@ mod tests {
     use boojum::field::Field;
     use boojum::gpu_synthesizer::{TestDestination, TestSource};
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
-    use cudart::memory::{memory_copy_async, DeviceAllocation};
-    use cudart::slice::DeviceSlice;
+    use era_cudart::memory::{memory_copy_async, DeviceAllocation};
+    use era_cudart::slice::DeviceSlice;
     use rand::prelude::*;
 
     type EF = ExtensionField;

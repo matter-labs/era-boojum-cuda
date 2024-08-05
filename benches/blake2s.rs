@@ -3,10 +3,10 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
-use boojum_cuda::blake2s::blake2s_pow;
-use criterion_cuda::CudaMeasurement;
-use cudart::memory::{memory_set_async, DeviceAllocation};
-use cudart::stream::CudaStream;
+use era_boojum_cuda::blake2s::blake2s_pow;
+use era_criterion_cuda::CudaMeasurement;
+use era_cudart::memory::{memory_set_async, DeviceAllocation};
+use era_cudart::stream::CudaStream;
 
 fn blake2s(c: &mut Criterion<CudaMeasurement>) {
     const MIN_BITS_COUNT: u32 = 17;

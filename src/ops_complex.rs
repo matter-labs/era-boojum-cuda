@@ -9,12 +9,14 @@ use crate::ops_cub::device_scan::{get_scan_temp_storage_bytes, scan_in_place, Sc
 use crate::ops_simple::{set_by_val, set_to_zero};
 use crate::utils::{get_grid_block_dims_for_threads_count, WARP_SIZE};
 use crate::BaseField;
-use cudart::execution::{CudaLaunchConfig, Dim3, KernelFunction};
-use cudart::paste::paste;
-use cudart::result::CudaResult;
-use cudart::slice::{DeviceSlice, DeviceVariable};
-use cudart::stream::CudaStream;
-use cudart::{cuda_kernel, cuda_kernel_declaration, cuda_kernel_signature_arguments_and_function};
+use era_cudart::execution::{CudaLaunchConfig, Dim3, KernelFunction};
+use era_cudart::paste::paste;
+use era_cudart::result::CudaResult;
+use era_cudart::slice::{DeviceSlice, DeviceVariable};
+use era_cudart::stream::CudaStream;
+use era_cudart::{
+    cuda_kernel, cuda_kernel_declaration, cuda_kernel_signature_arguments_and_function,
+};
 use std::mem;
 
 type BF = BaseField;
@@ -1341,10 +1343,10 @@ mod tests {
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::field::{Field, PrimeField};
     use boojum::worker::Worker;
-    use cudart::memory::{memory_copy_async, DeviceAllocation};
-    use cudart::result::CudaResult;
-    use cudart::slice::DeviceSlice;
-    use cudart::stream::CudaStream;
+    use era_cudart::memory::{memory_copy_async, DeviceAllocation};
+    use era_cudart::result::CudaResult;
+    use era_cudart::slice::DeviceSlice;
+    use era_cudart::stream::CudaStream;
     use itertools::Itertools;
     use rand::distributions::{Distribution, Uniform};
     use rand::{thread_rng, Rng};
