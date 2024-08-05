@@ -105,9 +105,9 @@ dependencies = [
 
 [[package]]
 name = "boojum"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f0c2cba247d620ff76123efb335401aa05ec5639551e6ef4e5f977c0809b5cb"
+checksum = "0cf10f4b3980dc82dc31709dfa8193b7d6106a3a7ce9f9a9f8872bfb8719aa2d"
 dependencies = [
  "arrayvec",
  "bincode",
@@ -136,7 +136,7 @@ dependencies = [
 
 [[package]]
 name = "boojum-cuda"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blake2",
  "boojum",
@@ -453,9 +453,9 @@ dependencies = [
 
 [[package]]
 name = "cs_derive"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "faa0b8f9fdb5c91dcd5569cc7cbc11f514fd784a34988ead8455db0db2cfc1c7"
+checksum = "ab1f510bfddd1fc643a1d1bf8a405e279ffc818ee7ac86ed658e667a44958178"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",

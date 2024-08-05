@@ -1,6 +1,6 @@
 [package]
 name = "boojum-cuda"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 build = "build/main.rs"
 authors = ["The Matter Labs Team <hello@matterlabs.dev>"]
@@ -12,13 +12,13 @@ categories = ["cryptography"]
 description = "Boojum-CUDA is a library implementing GPU-accelerated cryptographic functionality for the zkSync prover"
 
 [build-dependencies]
-boojum = "=0.2.0"
+boojum = "=0.2.1"
 cudart-sys = { version = "=0.1.0", package = "era_cudart_sys" }
 cmake = "0.1"
 itertools = "0.13"
 
 [dependencies]
-boojum = "=0.2.0"
+boojum = "=0.2.1"
 cudart = { version = "=0.1.0", package = "era_cudart" }
 cudart-sys = { version = "=0.1.0", package = "era_cudart_sys" }
 itertools = "0.13"
