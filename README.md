@@ -7,18 +7,19 @@ decentralization. Since it's EVM compatible (Solidity/Vyper), 99% of Ethereum pr
 or re-auditing a single line of code. zkSync Era also uses an LLVM-based compiler that will eventually let developers
 write smart contracts in C++, Rust and other popular languages.
 
-
 ## Boojum-CUDA
+
 Boojum-CUDA is a library implementing GPU-accelerated cryptographic functionality for the zkSync prover.
 
-Prerequisites: 
-- CUDA 12.x
+Prerequisites:
+
+- CUDA Toolkit 12.x
 - CMake 3.24 and up
 - clang
 - rust nightly toolchain
 
-By default, the CUDA code is compiled for the GPU that is present in the system. If there is no GPU in the system or 
-another architecture is desired, the environment variable `CUDAARCHS` can be set to the desired architecture. 
+By default, the CUDA code is compiled for the GPU that is present in the system. If there is no GPU in the system or
+another architecture is desired, the environment variable `CUDAARCHS` can be set to the desired architecture.
 See https://cmake.org/cmake/help/latest/variable/CMAKE_CUDA_ARCHITECTURES.html.
 
 ## Policies

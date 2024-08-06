@@ -12,22 +12,22 @@ categories = ["cryptography"]
 description = "Boojum-CUDA is a library implementing GPU-accelerated cryptographic functionality for the zkSync prover"
 
 [build-dependencies]
-boojum = "=0.2.1"
-era_cudart_sys = { git = "https://github.com/matter-labs/era-cuda.git", branch = "rr-build-refactor", version = "=0.2.0", package = "era_cudart_sys" }
+boojum = "=0.2.2"
+era_cudart_sys = "=0.2.0"
 cmake = "0.1"
 itertools = "0.13"
 
 [dependencies]
-boojum = "=0.2.1"
-era_cudart = { git = "https://github.com/matter-labs/era-cuda.git", branch = "rr-build-refactor", version = "=0.2.0", package = "era_cudart" }
-era_cudart_sys = { git = "https://github.com/matter-labs/era-cuda.git", branch = "rr-build-refactor", version = "=0.2.0" , package = "era_cudart_sys"  }
+boojum = "=0.2.2"
+era_cudart = "=0.2.0"
+era_cudart_sys = "=0.2.0"
 itertools = "0.13"
 lazy_static = "1.4"
 
 [dev-dependencies]
 blake2 = "0.10"
 criterion = "0.5"
-era_criterion_cuda = { git = "https://github.com/matter-labs/era-cuda.git", branch = "rr-build-refactor", version = "=0.2.0", package = "era_criterion_cuda" }
+era_criterion_cuda = "=0.2.0"
 criterion-macro = "0.4"
 itertools = "0.13"
 rand = "0.8"
