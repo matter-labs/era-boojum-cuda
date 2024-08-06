@@ -8,12 +8,12 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Samplin
 use rand::prelude::*;
 use rayon::prelude::*;
 
-use boojum_cuda::device_structures::{DeviceMatrixChunk, DeviceMatrixChunkMut};
-use boojum_cuda::gates::*;
-use criterion_cuda::CudaMeasurement;
-use cudart::memory::{memory_copy, DeviceAllocation};
-use cudart::slice::DeviceSlice;
-use cudart::stream::CudaStream;
+use era_boojum_cuda::device_structures::{DeviceMatrixChunk, DeviceMatrixChunkMut};
+use era_boojum_cuda::gates::*;
+use era_criterion_cuda::CudaMeasurement;
+use era_cudart::memory::{memory_copy, DeviceAllocation};
+use era_cudart::slice::DeviceSlice;
+use era_cudart::stream::CudaStream;
 
 fn poseidon_group(c: &mut Criterion<CudaMeasurement>, group_name: &str, gate_name: &str) {
     const VARIABLES_COUNT: usize = 140;

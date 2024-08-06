@@ -1,7 +1,7 @@
 use crate::extension_field::{ExtensionField, VectorizedExtensionField};
 use crate::BaseField;
-use cudart::memory::DeviceAllocation;
-use cudart::slice::{DeviceSlice, DeviceVariable};
+use era_cudart::memory::DeviceAllocation;
+use era_cudart::slice::{DeviceSlice, DeviceVariable};
 
 pub trait DeviceRepr: Sized {
     type Type: Sized;

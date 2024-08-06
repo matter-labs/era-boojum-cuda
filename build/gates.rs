@@ -55,8 +55,8 @@ pub(super) fn generate() {
 }
 
 fn generate_cuda(descriptions: &[Description]) {
-    const TEMPLATE_PATH: &str = "native/gates_template.cu";
-    const RESULT_PATH: &str = "native/gates.cu";
+    const TEMPLATE_PATH: &str = "native/gate_kernels_template.cuh";
+    const RESULT_PATH: &str = "gate_kernels.cuh";
     let mut code = String::new();
     let s = &mut code;
     new_line(s);
@@ -180,7 +180,7 @@ fn generate_cuda(descriptions: &[Description]) {
 
 fn generate_rust(descriptions: &[Description]) {
     const TEMPLATE_PATH: &str = "src/gates_data_template.rs";
-    const RESULT_PATH: &str = "src/gates_data.rs";
+    const RESULT_PATH: &str = "gates_data.rs";
     let mut hash_map = String::new();
     let mut bindings = String::new();
     let mut mappings = String::new();

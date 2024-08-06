@@ -2,12 +2,12 @@ use std::ptr::null_mut;
 
 use boojum::field::goldilocks::GoldilocksField;
 
-use cudart::result::{CudaResult, CudaResultWrap};
-use cudart::slice::{DeviceSlice, DeviceVariable};
-use cudart::stream::CudaStream;
-use cudart_sys::{cudaError_t, cudaStream_t};
+use era_cudart::result::{CudaResult, CudaResultWrap};
+use era_cudart::slice::{DeviceSlice, DeviceVariable};
+use era_cudart::stream::CudaStream;
+use era_cudart_sys::{cudaError_t, cudaStream_t, cuda_fn_and_stub};
 
-extern "C" {
+cuda_fn_and_stub! {
     fn encode_u32(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -18,7 +18,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn encode_u64(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -166,8 +168,8 @@ mod tests {
     use rand::distributions::{Distribution, Standard, Uniform};
     use rand::{thread_rng, Rng};
 
-    use cudart::memory::{memory_copy_async, DeviceAllocation};
-    use cudart::stream::CudaStream;
+    use era_cudart::memory::{memory_copy_async, DeviceAllocation};
+    use era_cudart::stream::CudaStream;
 
     fn encode<T>()
     where

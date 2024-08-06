@@ -2,10 +2,10 @@ use boojum::cs::implementations::utils::domain_generator_for_size;
 use boojum::fft::{bitreverse_enumeration_inplace, distribute_powers};
 use boojum::field::goldilocks::GoldilocksField;
 use boojum::field::{Field, PrimeField};
-use cudart::memory::{memory_copy, DeviceAllocation};
-use cudart::result::{CudaResult, CudaResultWrap};
-use cudart::slice::DeviceSlice;
-use cudart_sys::{cudaMemcpyToSymbol, CudaMemoryCopyKind};
+use era_cudart::memory::{memory_copy, DeviceAllocation};
+use era_cudart::result::{CudaResult, CudaResultWrap};
+use era_cudart::slice::DeviceSlice;
+use era_cudart_sys::{cudaMemcpyToSymbol, cuda_struct_and_stub, CudaMemoryCopyKind};
 use std::mem::size_of;
 use std::os::raw::c_void;
 
@@ -29,6 +29,8 @@ impl PowersLayerData {
     }
 }
 
+unsafe impl Sync for PowersLayerData {}
+
 #[repr(C)]
 struct PowersData {
     fine: PowersLayerData,
@@ -48,14 +50,14 @@ impl PowersData {
     }
 }
 
-extern "C" {
-    static powers_data_w: PowersData;
-    static powers_data_w_bitrev_for_ntt: PowersData;
-    static powers_data_w_inv_bitrev_for_ntt: PowersData;
-    static powers_data_g_f: PowersData;
-    static powers_data_g_i: PowersData;
-    static inv_sizes: [GoldilocksField; OMEGA_LOG_ORDER as usize + 1];
-}
+unsafe impl Sync for PowersData {}
+
+cuda_struct_and_stub! { static powers_data_w: PowersData; }
+cuda_struct_and_stub! { static powers_data_w_bitrev_for_ntt: PowersData; }
+cuda_struct_and_stub! { static powers_data_w_inv_bitrev_for_ntt: PowersData; }
+cuda_struct_and_stub! { static powers_data_g_f: PowersData; }
+cuda_struct_and_stub! { static powers_data_g_i: PowersData; }
+cuda_struct_and_stub! { static inv_sizes: [GoldilocksField; OMEGA_LOG_ORDER as usize + 1]; }
 
 unsafe fn copy_to_symbol<T>(symbol: &T, src: &T) -> CudaResult<()> {
     cudaMemcpyToSymbol(

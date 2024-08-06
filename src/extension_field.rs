@@ -1,10 +1,10 @@
 use boojum::field::goldilocks::{GoldilocksExt2, GoldilocksField};
-use cudart::cuda_kernel_declaration;
-use cudart::cuda_kernel_signature_arguments_and_function;
-use cudart::execution::{CudaLaunchConfig, KernelFunction};
-use cudart::paste::paste;
-use cudart::result::CudaResult;
-use cudart::stream::CudaStream;
+use era_cudart::cuda_kernel_declaration;
+use era_cudart::cuda_kernel_signature_arguments_and_function;
+use era_cudart::execution::{CudaLaunchConfig, KernelFunction};
+use era_cudart::paste::paste;
+use era_cudart::result::CudaResult;
+use era_cudart::stream::CudaStream;
 
 use crate::device_structures::{
     DeviceMatrixChunkImpl, DeviceMatrixChunkMutImpl, DeviceRepr, MutPtrAndStride, PtrAndStride,
@@ -169,8 +169,8 @@ mod tests {
     use crate::extension_field::{ExtensionField, VectorizedExtensionField};
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::field::Field;
-    use cudart::memory::{memory_copy_async, DeviceAllocation};
-    use cudart::stream::CudaStream;
+    use era_cudart::memory::{memory_copy_async, DeviceAllocation};
+    use era_cudart::stream::CudaStream;
     use itertools::Itertools;
     use rand::distributions::Uniform;
     use rand::prelude::*;

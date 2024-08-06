@@ -11,10 +11,10 @@ use criterion::{
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use boojum_cuda::ops_simple;
-use criterion_cuda::CudaMeasurement;
-use cudart::memory::{memory_copy, DeviceAllocation};
-use cudart::stream::CudaStream;
+use era_boojum_cuda::ops_simple;
+use era_criterion_cuda::CudaMeasurement;
+use era_cudart::memory::{memory_copy, DeviceAllocation};
+use era_cudart::stream::CudaStream;
 
 fn goldilocks_inv(c: &mut Criterion<CudaMeasurement>) {
     const MIN_LOG_N: usize = 17;

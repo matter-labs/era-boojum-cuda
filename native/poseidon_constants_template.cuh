@@ -1,8 +1,6 @@
 // clang-format off
 #pragma once
 
-#include "goldilocks.cuh"
-
 namespace poseidon_common {
 
 using namespace goldilocks;

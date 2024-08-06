@@ -1,4 +1,4 @@
-use cudart::execution::Dim3;
+use era_cudart::execution::Dim3;
 use std::cmp::min;
 
 pub const WARP_SIZE: u32 = 32;

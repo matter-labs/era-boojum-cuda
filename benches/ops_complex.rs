@@ -3,11 +3,11 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
-use boojum_cuda::device_structures::DeviceMatrixMut;
-use boojum_cuda::ops_complex::bit_reverse_in_place;
-use criterion_cuda::CudaMeasurement;
-use cudart::memory::DeviceAllocation;
-use cudart::stream::CudaStream;
+use era_boojum_cuda::device_structures::DeviceMatrixMut;
+use era_boojum_cuda::ops_complex::bit_reverse_in_place;
+use era_criterion_cuda::CudaMeasurement;
+use era_cudart::memory::DeviceAllocation;
+use era_cudart::stream::CudaStream;
 
 fn bit_reverse(c: &mut Criterion<CudaMeasurement>) {
     const LOG_MIN_BATCH_SIZE: usize = 0;

@@ -9,11 +9,11 @@ use criterion::{criterion_group, criterion_main, Criterion, SamplingMode, Throug
 use rand::{thread_rng, Rng};
 use rayon::prelude::*;
 
-use boojum_cuda::context::Context;
-use boojum_cuda::ntt::*;
-use criterion_cuda::CudaMeasurement;
-use cudart::memory::{memory_copy, DeviceAllocation};
-use cudart::stream::CudaStream;
+use era_boojum_cuda::context::Context;
+use era_boojum_cuda::ntt::*;
+use era_criterion_cuda::CudaMeasurement;
+use era_cudart::memory::{memory_copy, DeviceAllocation};
+use era_cudart::stream::CudaStream;
 
 type CudaMeasurementInvElems = CudaMeasurement<true>;
 

@@ -49,15 +49,15 @@ jobs:
       - name: Setup rust
         run: |
           rustup set profile minimal
-          rustup toolchain install nightly-2024-05-07
-          rustup default nightly-2024-05-07
+          rustup toolchain install nightly-2024-08-01
+          rustup default nightly-2024-08-01
 
       - name: Build tests and copy binaries to a separate dir
         shell: bash
         run: |
           mkdir artifacts
           CUDAARCHS=80 CARGO_TARGET_DIR=./build \
-          cargo +nightly-2024-05-07 test --no-run --release --message-format=json -q \
+          cargo +nightly-2024-08-01 test --no-run --release --message-format=json -q \
           | jq -r 'select(.executable != null) | .executable' \
           | while read binary; do
             cp "$binary" artifacts/

@@ -2,15 +2,15 @@ use std::ptr::null_mut;
 
 use boojum::field::goldilocks::GoldilocksField;
 
-use cudart::event::{CudaEvent, CudaEventCreateFlags};
-use cudart::result::{CudaResult, CudaResultWrap};
-use cudart::slice::DeviceSlice;
-use cudart::stream::{CudaStream, CudaStreamCreateFlags, CudaStreamWaitEventFlags};
-use cudart_sys::{cudaError_t, cudaStream_t};
+use era_cudart::event::{CudaEvent, CudaEventCreateFlags};
+use era_cudart::result::{CudaResult, CudaResultWrap};
+use era_cudart::slice::DeviceSlice;
+use era_cudart::stream::{CudaStream, CudaStreamCreateFlags, CudaStreamWaitEventFlags};
+use era_cudart_sys::{cudaError_t, cudaStream_t, cuda_fn_and_stub};
 
 use crate::extension_field::ExtensionField;
 
-extern "C" {
+cuda_fn_and_stub! {
     fn exclusive_sum_u32(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -19,7 +19,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn exclusive_sum_reverse_u32(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -28,7 +30,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn inclusive_sum_u32(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -37,7 +41,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn inclusive_sum_reverse_u32(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -46,7 +52,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn exclusive_scan_add_bf(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -55,7 +63,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn exclusive_scan_reverse_add_bf(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -64,7 +74,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn inclusive_scan_add_bf(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -73,7 +85,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn inclusive_scan_reverse_add_bf(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -82,8 +96,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
-    #[allow(improper_ctypes)]
+cuda_fn_and_stub! {
     fn exclusive_scan_add_ef(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -92,8 +107,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
-    #[allow(improper_ctypes)]
+cuda_fn_and_stub! {
     fn exclusive_scan_reverse_add_ef(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -102,8 +118,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
-    #[allow(improper_ctypes)]
+cuda_fn_and_stub! {
     fn inclusive_scan_add_ef(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -112,8 +129,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
-    #[allow(improper_ctypes)]
+cuda_fn_and_stub! {
     fn inclusive_scan_reverse_add_ef(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -122,7 +140,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn exclusive_scan_mul_bf(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -131,7 +151,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn exclusive_scan_reverse_mul_bf(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -140,7 +162,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn inclusive_scan_mul_bf(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -149,7 +173,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
+cuda_fn_and_stub! {
     fn inclusive_scan_reverse_mul_bf(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -158,8 +184,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
-    #[allow(improper_ctypes)]
+cuda_fn_and_stub! {
     fn exclusive_scan_mul_ef(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -168,8 +195,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
-    #[allow(improper_ctypes)]
+cuda_fn_and_stub! {
     fn exclusive_scan_reverse_mul_ef(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -178,8 +206,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
-    #[allow(improper_ctypes)]
+cuda_fn_and_stub! {
     fn inclusive_scan_mul_ef(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -188,8 +217,9 @@ extern "C" {
         num_items: i32,
         stream: cudaStream_t,
     ) -> cudaError_t;
+}
 
-    #[allow(improper_ctypes)]
+cuda_fn_and_stub! {
     fn inclusive_scan_reverse_mul_ef(
         d_temp_storage: *mut u8,
         temp_storage_bytes: &mut usize,
@@ -664,8 +694,8 @@ mod tests {
     use rand::distributions::Uniform;
     use rand::{thread_rng, Rng};
 
-    use cudart::memory::{memory_copy_async, DeviceAllocation};
-    use cudart::stream::CudaStream;
+    use era_cudart::memory::{memory_copy_async, DeviceAllocation};
+    use era_cudart::stream::CudaStream;
 
     use crate::extension_field::ExtensionField;
     use crate::ops_cub::device_scan::{get_scan_temp_storage_bytes, Scan};

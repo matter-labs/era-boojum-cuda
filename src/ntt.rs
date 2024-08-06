@@ -1,11 +1,11 @@
 use crate::context::OMEGA_LOG_ORDER;
 use boojum::field::goldilocks::GoldilocksField;
-use cudart::cuda_kernel;
-use cudart::error::get_last_error;
-use cudart::execution::{CudaLaunchConfig, KernelFunction};
-use cudart::result::{CudaResult, CudaResultWrap};
-use cudart::slice::DeviceSlice;
-use cudart::stream::CudaStream;
+use era_cudart::cuda_kernel;
+use era_cudart::error::get_last_error;
+use era_cudart::execution::{CudaLaunchConfig, KernelFunction};
+use era_cudart::result::{CudaResult, CudaResultWrap};
+use era_cudart::slice::DeviceSlice;
+use era_cudart::stream::CudaStream;
 
 cuda_kernel!(
     SingleStage,
@@ -380,7 +380,9 @@ mod tests {
     };
     use boojum::field::{Field, PrimeField};
     use boojum::worker::Worker;
-    use cudart::memory::{memory_copy_async, CudaHostAllocFlags, DeviceAllocation, HostAllocation};
+    use era_cudart::memory::{
+        memory_copy_async, CudaHostAllocFlags, DeviceAllocation, HostAllocation,
+    };
     use rand::Rng;
     use serial_test::serial;
     use std::alloc::Global;
