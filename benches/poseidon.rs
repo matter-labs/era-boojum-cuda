@@ -1,7 +1,6 @@
 #![feature(custom_test_frameworks)]
 #![test_runner(criterion::runner)]
 
-use std::mem;
 use std::time::Duration;
 
 use boojum::field::goldilocks::GoldilocksField;
@@ -12,7 +11,7 @@ use criterion::{
 use rand::{thread_rng, Rng};
 use rayon::prelude::*;
 
-use era_boojum_cuda::poseidon::*;
+use boojum_cuda::poseidon::*;
 use era_criterion_cuda::CudaMeasurement;
 use era_cudart::memory::{memory_copy, DeviceAllocation};
 use era_cudart::result::CudaResult;
@@ -46,7 +45,7 @@ fn leaves_group(
     group.measurement_time(Duration::from_secs(5));
     group.sampling_mode(SamplingMode::Flat);
     for log_count in MIN_LOG_N..=MAX_LOG_N {
-        let bytes = (CHUNKS_PER_LEAF * RATE * mem::size_of::<GoldilocksField>()) << log_count;
+        let bytes = (CHUNKS_PER_LEAF * RATE * size_of::<GoldilocksField>()) << log_count;
         group.throughput(Throughput::Bytes(bytes as u64));
         group.bench_function(BenchmarkId::from_parameter(log_count), |b| {
             if !initialized {
@@ -115,7 +114,7 @@ fn nodes_group(
     group.measurement_time(Duration::from_millis(2500));
     group.sampling_mode(SamplingMode::Flat);
     for log_count in MIN_LOG_N..=MAX_LOG_N {
-        let bytes = (RATE * mem::size_of::<GoldilocksField>()) << log_count;
+        let bytes = (RATE * size_of::<GoldilocksField>()) << log_count;
         group.throughput(Throughput::Bytes(bytes as u64));
         group.bench_function(BenchmarkId::from_parameter(log_count), |b| {
             if !initialized {
@@ -190,7 +189,7 @@ fn merkle_tree<PoseidonVariant: PoseidonImpl>(
     group.measurement_time(Duration::from_secs(5));
     group.sampling_mode(SamplingMode::Flat);
     for log_count in MIN_LOG_N..=MAX_LOG_N {
-        let bytes = (CHUNKS_PER_LEAF * RATE * mem::size_of::<GoldilocksField>()) << log_count;
+        let bytes = (CHUNKS_PER_LEAF * RATE * size_of::<GoldilocksField>()) << log_count;
         group.throughput(Throughput::Bytes(bytes as u64));
         group.bench_function(BenchmarkId::from_parameter(log_count), |b| {
             if !initialized {

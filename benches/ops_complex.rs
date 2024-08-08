@@ -3,8 +3,8 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
-use era_boojum_cuda::device_structures::DeviceMatrixMut;
-use era_boojum_cuda::ops_complex::bit_reverse_in_place;
+use boojum_cuda::device_structures::DeviceMatrixMut;
+use boojum_cuda::ops_complex::bit_reverse_in_place;
 use era_criterion_cuda::CudaMeasurement;
 use era_cudart::memory::DeviceAllocation;
 use era_cudart::stream::CudaStream;

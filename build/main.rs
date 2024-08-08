@@ -30,7 +30,7 @@ fn main() {
             .build();
         let boojum_lib_path = dst.to_str().unwrap();
         println!("cargo:rustc-link-search=native={boojum_lib_path}");
-        println!("cargo:rustc-link-lib=static=era_boojum_cuda_native");
+        println!("cargo:rustc-link-lib=static=boojum_cuda_native");
         let cuda_lib_path = get_cuda_lib_path().unwrap();
         let cuda_lib_path_str = cuda_lib_path.to_str().unwrap();
         println!("cargo:rustc-link-search=native={cuda_lib_path_str}");

@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.24)
-project(era_boojum_cuda_native)
+project(boojum_cuda_native)
 enable_language(CUDA)
 if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     set(CMAKE_CUDA_ARCHITECTURES native)
 endif ()
-add_library(era_boojum_cuda_native STATIC
+add_library(boojum_cuda_native STATIC
         ops_cub/common.cuh
         ops_cub/device_radix_sort.cu
         ops_cub/device_reduce.cu
@@ -41,12 +41,12 @@ add_library(era_boojum_cuda_native STATIC
         poseidon_utils.cuh
         ptx.cuh
 )
-target_include_directories(era_boojum_cuda_native PRIVATE ${CMAKE_INSTALL_PREFIX})
-set_target_properties(era_boojum_cuda_native PROPERTIES CUDA_STANDARD 17)
-set_target_properties(era_boojum_cuda_native PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-set_target_properties(era_boojum_cuda_native PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-target_compile_options(era_boojum_cuda_native PRIVATE --expt-relaxed-constexpr)
-target_compile_options(era_boojum_cuda_native PRIVATE --ptxas-options=-v)
-#target_compile_options(era_boojum_cuda_native PRIVATE -lineinfo)
-#target_compile_options(era_boojum_cuda_native PRIVATE --keep)
-install(TARGETS era_boojum_cuda_native DESTINATION .)
+target_include_directories(boojum_cuda_native PRIVATE ${CMAKE_INSTALL_PREFIX})
+set_target_properties(boojum_cuda_native PROPERTIES CUDA_STANDARD 17)
+set_target_properties(boojum_cuda_native PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+set_target_properties(boojum_cuda_native PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+target_compile_options(boojum_cuda_native PRIVATE --expt-relaxed-constexpr)
+target_compile_options(boojum_cuda_native PRIVATE --ptxas-options=-v)
+#target_compile_options(boojum_cuda_native PRIVATE -lineinfo)
+#target_compile_options(boojum_cuda_native PRIVATE --keep)
+install(TARGETS boojum_cuda_native DESTINATION .)

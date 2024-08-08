@@ -3,7 +3,7 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
-use era_boojum_cuda::blake2s::blake2s_pow;
+use boojum_cuda::blake2s::blake2s_pow;
 use era_criterion_cuda::CudaMeasurement;
 use era_cudart::memory::{memory_set_async, DeviceAllocation};
 use era_cudart::stream::CudaStream;

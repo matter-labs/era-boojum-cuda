@@ -1,7 +1,6 @@
 #![feature(custom_test_frameworks)]
 #![test_runner(criterion::runner)]
 
-use std::mem;
 use std::time::Duration;
 
 use boojum::field::goldilocks::GoldilocksField;
@@ -11,7 +10,7 @@ use criterion::{
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use era_boojum_cuda::ops_simple;
+use boojum_cuda::ops_simple;
 use era_criterion_cuda::CudaMeasurement;
 use era_cudart::memory::{memory_copy, DeviceAllocation};
 use era_cudart::stream::CudaStream;
@@ -43,7 +42,7 @@ fn goldilocks_inv(c: &mut Criterion<CudaMeasurement>) {
     group.sampling_mode(SamplingMode::Flat);
     for log_count in MIN_LOG_N..=MAX_LOG_N {
         let count = 1 << log_count;
-        let bytes = mem::size_of::<GoldilocksField>() << log_count;
+        let bytes = size_of::<GoldilocksField>() << log_count;
         group.throughput(Throughput::Bytes(bytes as u64));
         group.bench_function(BenchmarkId::from_parameter(log_count), |b| {
             b.iter(|| {
