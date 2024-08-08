@@ -8,8 +8,8 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Samplin
 use rand::prelude::*;
 use rayon::prelude::*;
 
-use era_boojum_cuda::device_structures::{DeviceMatrixChunk, DeviceMatrixChunkMut};
-use era_boojum_cuda::gates::*;
+use boojum_cuda::device_structures::{DeviceMatrixChunk, DeviceMatrixChunkMut};
+use boojum_cuda::gates::*;
 use era_criterion_cuda::CudaMeasurement;
 use era_cudart::memory::{memory_copy, DeviceAllocation};
 use era_cudart::slice::DeviceSlice;
